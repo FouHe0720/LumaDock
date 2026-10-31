@@ -520,6 +520,7 @@ public sealed class ControlCenterWindow : Window
         SliderRow(stack, "图标大小", 32, 80, settings.IconSize, value => settings.IconSize = value, value => $"{value:0} px");
         SliderRow(stack, "图标间距", 3, 24, settings.Spacing, value => settings.Spacing = value, value => $"{value:0} px");
         var dockHeading = Section(stack, "Dock", "");
+        DockShapeRow(stack);
         SelectRow(stack, "位置", "", new[] { ("Bottom", "底部"), ("Left", "左侧"), ("Right", "右侧"), ("Top", "顶部") }, settings.Position, value => settings.Position = value);
         var monitors = new List<(string, string)> { ("", "主显示器（自动）") };
         try { monitors.AddRange(MonitorService.GetMonitors().Select(m => (m.DeviceName, m.Label))); } catch (Exception ex) { Debug.WriteLine(ex); }
@@ -573,8 +574,14 @@ public sealed class ControlCenterWindow : Window
     private void AccentPaletteRow(StackPanel parent)
     {
         var row = SettingRow(parent, "强调色", "用于按钮、选中状态和玻璃边缘");
-        var choices = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
-        var colors = new (string Value, string Label, string Color)[] { ("Lagoon", "潮蓝", "#75B8E4"), ("Jade", "青瓷", "#78B99C"), ("Amber", "琥珀", "#D5A454"), ("Iris", "烟紫", "#B59BD7") };
+        row.ColumnDefinitions[1].Width = new GridLength(322);
+        var choices = new WrapPanel { HorizontalAlignment = HorizontalAlignment.Right, MaxWidth = 322 };
+        var colors = new (string Value, string Label, string Color)[]
+        {
+            ("Lagoon", "潮蓝", "#75B8E4"), ("Jade", "青瓷", "#78B99C"),
+            ("Amber", "琥珀", "#D5A454"), ("Iris", "烟紫", "#B59BD7"),
+            ("Rose", "玫瑰", "#D69BAA"), ("Graphite", "石墨", "#889AA9")
+        };
         void UpdateSelection()
         {
             foreach (var button in choices.Children.OfType<Button>())
@@ -582,17 +589,59 @@ public sealed class ControlCenterWindow : Window
                 var selected = Equals(button.Tag, "Accent:" + _controller.State.Settings.Accent);
                 button.SetResourceReference(BackgroundProperty, selected ? "SelectionBrush" : "PanelBrush");
                 button.SetResourceReference(BorderBrushProperty, selected ? "AccentBrush" : "GlassHighlightBrush");
+                System.Windows.Automation.AutomationProperties.SetItemStatus(button, selected ? "已选择" : "");
             }
         }
         foreach (var color in colors)
         {
             var button = ActionButton("", () => { _controller.State.Settings.Accent = color.Value; SaveSettings(); UpdateSelection(); });
-            button.Tag = "Accent:" + color.Value; button.Width = 48; button.Padding = new Thickness(4, 8, 4, 6); button.Margin = new Thickness(0, 0, 6, 0);
+            button.Tag = "Accent:" + color.Value; button.Width = 48; button.Padding = new Thickness(4, 8, 4, 6); button.Margin = new Thickness(0, 0, 5, 0);
             ApplyButtonTemplate(button, new CornerRadius(9, 16, 9, 16));
             var content = new StackPanel();
             content.Children.Add(new Ellipse { Width = 17, Height = 17, Fill = new SolidColorBrush((Color)ColorConverter.ConvertFromString(color.Color)), HorizontalAlignment = HorizontalAlignment.Center });
             var label = Text(color.Label, 10); label.HorizontalAlignment = HorizontalAlignment.Center; label.Margin = new Thickness(0, 5, 0, 0); content.Children.Add(label); button.Content = content;
             System.Windows.Automation.AutomationProperties.SetName(button, "强调色 · " + color.Label); choices.Children.Add(button);
+        }
+        UpdateSelection(); Grid.SetColumn(choices, 1); row.Children.Add(choices);
+    }
+
+    private void DockShapeRow(StackPanel parent)
+    {
+        var row = SettingRow(parent, "Dock 轮廓", "");
+        var choices = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
+        var shapes = new (string Value, string Label, CornerRadius Radius)[]
+        {
+            ("Capsule", "胶囊", new CornerRadius(12)),
+            ("Pebble", "卵石", new CornerRadius(8, 16, 8, 16)),
+            ("Rail", "轨道", new CornerRadius(5))
+        };
+        void UpdateSelection()
+        {
+            foreach (var button in choices.Children.OfType<Button>())
+            {
+                var selected = Equals(button.Tag, "DockShape:" + _controller.State.Settings.DockShape);
+                button.SetResourceReference(BackgroundProperty, selected ? "SelectionBrush" : "PanelBrush");
+                button.SetResourceReference(BorderBrushProperty, selected ? "AccentBrush" : "GlassHighlightBrush");
+                System.Windows.Automation.AutomationProperties.SetItemStatus(button, selected ? "已选择" : "");
+            }
+        }
+        foreach (var shape in shapes)
+        {
+            var button = ActionButton("", () => { _controller.State.Settings.DockShape = shape.Value; SaveSettings(); UpdateSelection(); });
+            button.Tag = "DockShape:" + shape.Value; button.Width = 68; button.Padding = new Thickness(6, 9, 6, 7); button.Margin = new Thickness(0, 0, 6, 0);
+            ApplyButtonTemplate(button, new CornerRadius(9, 16, 9, 16));
+            var dots = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
+            for (var i = 0; i < 3; i++)
+            {
+                var dot = new Border { Width = 5, Height = 7, CornerRadius = new CornerRadius(1.5), Margin = new Thickness(2, 0, 2, 0), Opacity = i == 1 ? 1 : .65 };
+                dot.SetResourceReference(Border.BackgroundProperty, "AccentBrush"); dots.Children.Add(dot);
+            }
+            var preview = new Border { Width = 44, Height = shape.Value == "Rail" ? 18 : 24, CornerRadius = shape.Radius, BorderThickness = new Thickness(.8), Child = dots, VerticalAlignment = VerticalAlignment.Center };
+            preview.SetResourceReference(Border.BackgroundProperty, "AccentSoftBrush"); preview.SetResourceReference(Border.BorderBrushProperty, "AccentBrush");
+            var previewArea = new Grid { Height = 25 }; previewArea.Children.Add(preview);
+            var content = new StackPanel(); content.Children.Add(previewArea);
+            var label = Text(shape.Label, 10); label.HorizontalAlignment = HorizontalAlignment.Center; label.Margin = new Thickness(0, 6, 0, 0); content.Children.Add(label); button.Content = content;
+            System.Windows.Automation.AutomationProperties.SetName(button, "Dock 形状 · " + shape.Label); choices.Children.Add(button);
         }
         UpdateSelection(); Grid.SetColumn(choices, 1); row.Children.Add(choices);
     }

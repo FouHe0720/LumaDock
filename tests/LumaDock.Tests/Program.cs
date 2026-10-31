@@ -126,7 +126,7 @@ Test("Older configurations follow the system icon font without losing pins", () 
     var path = Path.Combine(root, "old-font-config.json");
     File.WriteAllText(path, """{"SchemaVersion":1,"Settings":{"Theme":"Dark"},"Apps":[{"Id":"editor","Name":"Editor","LaunchPath":"C:\\fixture\\editor.lnk"}],"PinnedIds":["editor"]}""");
     var read = StateStore.Read(path);
-    Assert(read.Settings.FollowSystemIconFont && read.Settings.Theme == "Dark" && read.PinnedIds.SequenceEqual(new[] { "editor" }));
+    Assert(read.Settings.FollowSystemIconFont && read.Settings.Theme == "Dark" && read.Settings.DockShape == "Capsule" && read.PinnedIds.SequenceEqual(new[] { "editor" }));
 });
 Test("Manual application typography survives a persistence roundtrip", () =>
 {
@@ -167,6 +167,32 @@ Test("Imported fonts remain family names and invalid flow falls back", () =>
     var read = StateStore.Read(path);
     Assert(read.Settings.NameFontFamily == "" && read.Settings.Accent == "Lagoon" && read.Settings.GlassFlowStrength == 1);
     read.Settings.GlassFlowStrength = double.NaN; Catalog.Normalize(read); Assert(read.Settings.GlassFlowStrength == .45);
+});
+
+Test("Every Dock silhouette and palette survives configuration export", () =>
+{
+    var st = Store("dock-personalization");
+    foreach (var shape in new[] { "Capsule", "Pebble", "Rail" })
+    foreach (var accent in new[] { "Lagoon", "Jade", "Amber", "Iris", "Rose", "Graphite" })
+    {
+        var state = new AppState { Settings = new() { DockShape = shape, Accent = accent } };
+        st.Save(state); var read = st.Load();
+        Assert(read.Settings.DockShape == shape && read.Settings.Accent == accent, "Dock personalization changed during save/reload.");
+        var exported = Path.Combine(root, "dock-personalization-export.json"); StateStore.Export(read, exported);
+        var imported = StateStore.Read(exported);
+        Assert(imported.Settings.DockShape == shape && imported.Settings.Accent == accent, "Dock personalization changed during export/import.");
+    }
+});
+Test("Unknown or null Dock silhouettes recover without losing organization", () =>
+{
+    var path = Path.Combine(root, "invalid-dock-personalization.json");
+    foreach (var value in new[] { "\"unknown\"", "null" })
+    {
+        File.WriteAllText(path, "{\"SchemaVersion\":1,\"Settings\":{\"DockShape\":" + value + ",\"Accent\":" + value + "},\"Apps\":[{\"Id\":\"editor\",\"Name\":\"Editor\",\"LaunchPath\":\"C:\\\\fixture\\\\editor.lnk\"}],\"PinnedIds\":[\"editor\"]}");
+        var read = StateStore.Read(path);
+        Assert(read.Settings.DockShape == "Capsule" && read.Settings.Accent == "Lagoon");
+        Assert(read.PinnedIds.SequenceEqual(new[] { "editor" }), "Invalid appearance removed valid pins.");
+    }
 });
 
 var reportIndex = Array.IndexOf(args, "--report");

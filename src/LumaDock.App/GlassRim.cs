@@ -24,6 +24,21 @@ internal sealed class GlassRim : FrameworkElement
     private Point lastPosition = new(-1, -1);
     private long lastInput, lastTick, releasedAt;
     private double position, target, phase, envelope, impulse = .6, direction = 1;
+    private bool drawStaticEdge = true;
+    private Contour? outerContour, innerContour;
+
+    public bool DrawStaticEdge
+    {
+        get => drawStaticEdge;
+        set { if (drawStaticEdge == value) return; drawStaticEdge = value; InvalidateVisual(); }
+    }
+
+    /// <summary>Optional exact contours, cached only on geometry changes. The ordinary window keeps its rounded contour.</summary>
+    internal void SetMotionContours(Geometry? outer, Geometry? inner)
+    {
+        outerContour = Contour.Create(outer); innerContour = Contour.Create(inner);
+        InvalidateVisual();
+    }
 
     public bool MotionEnabled
     {
@@ -70,8 +85,8 @@ internal sealed class GlassRim : FrameworkElement
         if (motion.IsEnabled && now - lastInput < 24) return;
         var bounds = Bounds(.7);
         var radius = SafeRadius(bounds, 0);
-        var length = Perimeter(bounds, radius);
-        var next = Project(bounds, radius, point) / length;
+        var length = outerContour?.Length ?? Perimeter(bounds, radius);
+        var next = outerContour?.Project(point) ?? Project(bounds, radius, point) / length;
         var distance = lastInput == 0 ? 0 : Math.Sqrt(Math.Pow((normalized.X - lastPosition.X) * ActualWidth, 2) + Math.Pow((normalized.Y - lastPosition.Y) * ActualHeight, 2));
         var elapsed = Math.Max(16, now - lastInput);
         var travel = WrapDelta(next - target);
@@ -123,44 +138,48 @@ internal sealed class GlassRim : FrameworkElement
         if (ActualWidth < 6 || ActualHeight < 6) return;
         var bounds = Bounds(.7);
         var radius = SafeRadius(bounds, 0);
-        // Separated light and shade make a narrow meniscus instead of a bright halo.
-        dc.DrawRoundedRectangle(Reflection, Outer, bounds, radius, radius);
-        var inset = Bounds(2.3);
-        dc.DrawRoundedRectangle(null, Inner, inset, SafeRadius(inset, 1.6), SafeRadius(inset, 1.6));
-        dc.DrawRoundedRectangle(null, Lower, bounds, radius, radius);
-        if (ActualWidth > 14 && ActualHeight > 14)
+        if (DrawStaticEdge)
         {
-            var deep = Bounds(4.1);
-            dc.DrawRoundedRectangle(null, Deep, deep, SafeRadius(deep, 3.4), SafeRadius(deep, 3.4));
+            // Separated light and shade make a narrow meniscus instead of a bright halo.
+            dc.DrawRoundedRectangle(Reflection, Outer, bounds, radius, radius);
+            var inset = Bounds(2.3);
+            dc.DrawRoundedRectangle(null, Inner, inset, SafeRadius(inset, 1.6), SafeRadius(inset, 1.6));
+            dc.DrawRoundedRectangle(null, Lower, bounds, radius, radius);
+            if (ActualWidth > 14 && ActualHeight > 14)
+            {
+                var deep = Bounds(4.1);
+                dc.DrawRoundedRectangle(null, Deep, deep, SafeRadius(deep, 3.4), SafeRadius(deep, 3.4));
+            }
         }
         var amount = Math.Clamp(envelope * MotionStrength, 0, 1);
         if (amount <= .002) return;
-        var length = Perimeter(bounds, radius);
+        var length = outerContour?.Length ?? Perimeter(bounds, radius);
         var drift = direction * Math.Sin(phase) * 18 * MotionStrength / length;
         var center = Wrap(position + drift);
         var span = Math.Clamp(Math.Min(ActualWidth, ActualHeight) * .42 + 88, 100, 275) * (1 + Math.Sin(phase * .85) * .1 * MotionStrength);
         // Both strokes follow the same rounded contour, at different depths.
         // Their short relative drift gives the edge a fluid response to movement.
-        DrawRibbon(dc, bounds, radius, center, span, amount, 1.35, 0);
+        DrawRibbon(dc, bounds, radius, center, span, amount, 1.35, 0, outerContour);
         if (ActualWidth > 16 && ActualHeight > 16)
         {
             var inner = Bounds(4.5);
-            DrawRibbon(dc, inner, SafeRadius(inner, 3.8), Wrap(center - direction * 12 / length), span * .76, amount * .42, .85, 1);
+            DrawRibbon(dc, inner, SafeRadius(inner, 3.8), Wrap(center - direction * 12 / length), span * .76, amount * .42, .85, 1, innerContour);
         }
     }
 
-    private void DrawRibbon(DrawingContext dc, Rect bounds, double radius, double center, double span, double amount, double width, int depth)
+    private void DrawRibbon(DrawingContext dc, Rect bounds, double radius, double center, double span, double amount, double width, int depth, Contour? contour)
     {
-        var perimeter = Perimeter(bounds, radius);
+        var perimeter = contour?.Length ?? Perimeter(bounds, radius);
         span = Math.Min(span, perimeter * .42);
         var half = span / perimeter / 2;
-        var start = At(bounds, radius, (center - half) * perimeter);
-        var end = At(bounds, radius, (center + half) * perimeter);
+        Point Sample(double fraction) => contour?.At(fraction) ?? At(bounds, radius, fraction * perimeter);
+        var start = Sample(center - half);
+        var end = Sample(center + half);
         var geometry = new StreamGeometry();
         using (var context = geometry.Open())
         {
             context.BeginFigure(start, false, false);
-            for (var index = 1; index <= 30; index++) context.LineTo(At(bounds, radius, (center - half + 2 * half * index / 30) * perimeter), true, false);
+            for (var index = 1; index <= 30; index++) context.LineTo(Sample(center - half + 2 * half * index / 30), true, false);
         }
         geometry.Freeze();
         var brush = new LinearGradientBrush { MappingMode = BrushMappingMode.Absolute, StartPoint = start, EndPoint = end };
@@ -174,6 +193,49 @@ internal sealed class GlassRim : FrameworkElement
         var pen = new Pen(brush, width) { StartLineCap = PenLineCap.Round, EndLineCap = PenLineCap.Round, LineJoin = PenLineJoin.Round };
         pen.Freeze();
         dc.DrawGeometry(null, pen, geometry);
+    }
+
+    /// <summary>Arc-length lookup for an optional asymmetric outline; no flattening occurs in the motion clock.</summary>
+    private sealed class Contour(Point[] points, double[] distances)
+    {
+        public double Length => distances[^1];
+        public static Contour? Create(Geometry? geometry)
+        {
+            if (geometry == null) return null;
+            var path = geometry.GetFlattenedPathGeometry(.08, ToleranceType.Absolute);
+            if (path.Figures.Count == 0) return null;
+            var figure = path.Figures[0]; var list = new List<Point> { figure.StartPoint };
+            foreach (var segment in figure.Segments)
+                if (segment is LineSegment line) list.Add(line.Point);
+                else if (segment is PolyLineSegment polyline) list.AddRange(polyline.Points);
+            if (figure.IsClosed && list[^1] != list[0]) list.Add(list[0]);
+            if (list.Count < 2) return null;
+            var points = list.ToArray(); var lengths = new double[points.Length];
+            for (var i = 1; i < points.Length; i++) lengths[i] = lengths[i - 1] + (points[i] - points[i - 1]).Length;
+            return lengths[^1] > .001 ? new(points, lengths) : null;
+        }
+        public Point At(double fraction)
+        {
+            var distance = Wrap(fraction) * Length;
+            var found = Array.BinarySearch(distances, distance);
+            var index = Math.Clamp(found >= 0 ? found : ~found - 1, 0, points.Length - 2);
+            var span = distances[index + 1] - distances[index];
+            return points[index] + (points[index + 1] - points[index]) * (span <= .00001 ? 0 : (distance - distances[index]) / span);
+        }
+        public double Project(Point point)
+        {
+            var best = double.PositiveInfinity; var position = 0d;
+            for (var i = 0; i < points.Length - 1; i++)
+            {
+                var edge = points[i + 1] - points[i]; var square = edge.LengthSquared;
+                if (square <= .00001) continue;
+                var t = Math.Clamp(Vector.Multiply(point - points[i], edge) / square, 0, 1);
+                var delta = point - (points[i] + edge * t);
+                if (delta.LengthSquared >= best) continue;
+                best = delta.LengthSquared; position = distances[i] + (distances[i + 1] - distances[i]) * t;
+            }
+            return position / Length;
+        }
     }
 
     private Rect Bounds(double inset) => new(inset, inset, Math.Max(0, ActualWidth - inset * 2), Math.Max(0, ActualHeight - inset * 2));

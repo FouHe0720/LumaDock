@@ -22,10 +22,27 @@ public static class LiquidLensRenderer
     public const int MaximumOutputPixels = 2_097_152;
 
     /// <returns>A premultiplied BGRA buffer suitable for WPF PixelFormats.Pbgra32.</returns>
-    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static byte[] Render(LensSource source, WallpaperPlacement placement, LensViewport viewport,
         int outputWidth, int outputHeight, double radiusPixels, bool dark, double clarity,
         CancellationToken cancellationToken = default)
+    {
+        // Value-type specializations let the JIT remove all strip bookkeeping
+        // from ordinary windows. Their hot per-pixel loop stays unchanged.
+        if (viewport != null && outputWidth is > 0 and <= 8192 && outputHeight > 0 && clarity is >= 0 and < .75
+            && viewport.Width > 0 && viewport.Height > 0 && viewport.Width >= viewport.Height * 2
+            && InteriorBlurRadius(outputWidth, outputHeight, Math.Max(viewport.Width / outputWidth, viewport.Height / outputHeight), clarity) == 0)
+            return RenderCore<HorizontalStripMode>(source, placement, viewport, outputWidth, outputHeight, radiusPixels, dark, clarity, cancellationToken);
+        return RenderCore<FullFrameMode>(source, placement, viewport!, outputWidth, outputHeight, radiusPixels, dark, clarity, cancellationToken);
+    }
+
+    private readonly struct FullFrameMode { }
+    private readonly struct HorizontalStripMode { }
+
+    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
+    private static byte[] RenderCore<TMode>(LensSource source, WallpaperPlacement placement, LensViewport viewport,
+        int outputWidth, int outputHeight, double radiusPixels, bool dark, double clarity,
+        CancellationToken cancellationToken) where TMode : struct
     {
         ArgumentNullException.ThrowIfNull(source);
         ArgumentNullException.ThrowIfNull(placement);
@@ -73,6 +90,20 @@ public static class LiquidLensRenderer
                 columns[x] = sampler.ColumnAt(viewport.X + (x + .5) * stepX);
             }
         var bodyInset = Math.Max(edgeBand, footprint * .5);
+        // Along a long horizontal dock, every point beyond the end caps has
+        // the same normal/depth as the other points on its row. Reuse that
+        // exact optical solution and the bilinear sample axes; keep the four
+        // original softened samples rather than reducing image quality.
+        // Leave one extra sample at either cap so floating-point ties on the
+        // shape's medial axis still use the scalar normal selection.
+        var reuseStrip = typeof(TMode) == typeof(HorizontalStripMode);
+        var stripStart = reuseStrip
+            ? Math.Clamp((int)Math.Ceiling((halfHeight + footprint) / stepX - .5), 0, outputWidth) : outputWidth;
+        var stripEnd = reuseStrip
+            ? Math.Clamp((int)Math.Floor((viewport.Width - halfHeight - footprint) / stepX - .5) + 1, stripStart, outputWidth) : outputWidth;
+        if (stripEnd > stripStart) RenderHorizontalStrip(output, outputWidth, outputHeight, sampler, viewport,
+            stripStart, stripEnd, stepX, stepY, halfHeight, radius, edgeBand, footprint, maxDeflection,
+            blurRadius, bodyImageAmount, dark, cancellationToken);
 
         for (var y = 0; y < outputHeight; y++)
         {
@@ -84,6 +115,8 @@ public static class LiquidLensRenderer
             var sourceRow = sampler.RowAt(viewport.Y + localY);
             for (var x = 0; x < outputWidth; x++)
             {
+                if (typeof(TMode) == typeof(HorizontalStripMode) && x == stripStart)
+                { x = stripEnd; if (x == outputWidth) break; }
                 var localX = (x + .5) * stepX;
                 var offset = (y * outputWidth + x) * 4;
                 // Most of a window is a flat, fully covered centre. It does not
@@ -152,6 +185,82 @@ public static class LiquidLensRenderer
         BlurInterior(output, outputWidth, outputHeight, stepX, stepY, radius, edgeBand, interiorBlurRadius, cancellationToken);
         cancellationToken.ThrowIfCancellationRequested();
         return output;
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
+    private static void RenderHorizontalStrip(byte[] output, int width, int height, Sampler sampler, LensViewport viewport,
+        int start, int end, double stepX, double stepY, double halfHeight, double radius, double edgeBand,
+        double footprint, double maxDeflection, double blurRadius, double bodyImageAmount, bool dark,
+        CancellationToken cancellationToken)
+    {
+        var columns = ArrayPool<SampleAxis>.Shared.Rent((end - start) * 3);
+        try
+        {
+            for (var x = start; x < end; x++)
+            {
+                if ((x & 255) == 0) cancellationToken.ThrowIfCancellationRequested();
+                var screenX = viewport.X + (x + .5) * stepX;
+                var index = (x - start) * 3;
+                columns[index] = sampler.ColumnAt(screenX - blurRadius);
+                columns[index + 1] = sampler.ColumnAt(screenX + blurRadius);
+                columns[index + 2] = sampler.ColumnAt(screenX);
+            }
+            for (var y = 0; y < height; y++)
+            {
+                if ((y & 7) == 0) cancellationToken.ThrowIfCancellationRequested();
+                var strip = RowOptics((y + .5) * stepY, halfHeight, radius, edgeBand, footprint, maxDeflection,
+                    blurRadius, bodyImageAmount, dark, viewport.Y, sampler);
+                for (var x = start; x < end; x++)
+                {
+                    var offset = (y * width + x) * 4;
+                    var index = (x - start) * 3;
+                    var colour = (sampler.SampleColour(columns[index], strip.Row)
+                        + sampler.SampleColour(columns[index + 1], strip.Row)
+                        + sampler.SampleColour(columns[index + 2], strip.UpperRow)
+                        + sampler.SampleColour(columns[index + 2], strip.LowerRow)) * .25;
+                    output[offset] = Premultiply(colour.B * strip.ImageAmount + strip.BaseAmount + strip.Finishing, strip.Coverage);
+                    output[offset + 1] = Premultiply(colour.G * strip.ImageAmount + strip.BaseAmount + strip.Finishing, strip.Coverage);
+                    output[offset + 2] = Premultiply(colour.R * strip.ImageAmount + strip.BaseAmount + strip.Finishing, strip.Coverage);
+                    output[offset + 3] = strip.Alpha;
+                }
+            }
+        }
+        finally { ArrayPool<SampleAxis>.Shared.Return(columns); }
+    }
+
+    private readonly record struct StripRow(SampleAxis Row, SampleAxis UpperRow, SampleAxis LowerRow,
+        double ImageAmount, double BaseAmount, double Finishing, double Coverage, byte Alpha);
+
+    [MethodImpl(MethodImplOptions.AggressiveOptimization)]
+    private static StripRow RowOptics(double localY, double halfHeight, double radius, double edgeBand,
+        double footprint, double maxDeflection, double blurRadius, double bodyImageAmount, bool dark,
+        double viewportY, Sampler sampler)
+    {
+        // Keep the same arithmetic order as the general signed-distance path.
+        var centredY = localY - halfHeight;
+        var qy = Math.Abs(centredY) - (halfHeight - radius);
+        var outsideY = Math.Max(qy, 0);
+        var length = Math.Sqrt(outsideY * outsideY);
+        var signedDistance = length + Math.Min(qy, 0) - radius;
+        var coverage = Math.Clamp(.5 - signedDistance / footprint, 0, 1);
+        var depth = Math.Max(0, -signedDistance);
+        var normalY = 0d; var profile = 0d;
+        if (depth < edgeBand)
+        {
+            normalY = length > .000001 ? outsideY / length * Math.Sign(centredY) : Math.Sign(centredY);
+            var t = 1 - depth / edgeBand;
+            profile = t * t * (3 - 2 * t);
+        }
+        var sampleY = viewportY + localY + normalY * maxDeflection * profile;
+        var imageAmount = bodyImageAmount + profile * .20;
+        var baseAmount = dark ? 4 : 255 * (1 - imageAmount);
+        var lighting = Math.Clamp(.5 + -normalY * .83 * .5, 0, 1);
+        var ridge = Math.Max(0, 1 - Math.Abs(depth - 1.1) / 1.6);
+        var glint = ridge * ridge * (dark ? 24 : 13) * (.3 + .7 * lighting);
+        var innerShade = Math.Max(0, 1 - Math.Abs(depth - 4) / 3) * (1 - lighting) * 5;
+        var finishing = glint + profile * lighting * 2 - innerShade;
+        return new(sampler.RowAt(sampleY), sampler.RowAt(sampleY - blurRadius), sampler.RowAt(sampleY + blurRadius),
+            imageAmount, baseAmount, finishing, coverage, Channel(255 * coverage));
     }
 
     private static int InteriorBlurRadius(int width, int height, double footprint, double clarity) =>
@@ -318,6 +427,13 @@ public static class LiquidLensRenderer
         public Colour At(double screenX, double screenY)
         {
             var packed = Sample(ColumnAt(screenX), RowAt(screenY));
+            return new((byte)packed, (byte)(packed >> 8), (byte)(packed >> 16));
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public Colour SampleColour(SampleAxis column, SampleAxis row)
+        {
+            var packed = Sample(column, row);
             return new((byte)packed, (byte)(packed >> 8), (byte)(packed >> 16));
         }
 

@@ -30,6 +30,9 @@ internal sealed class LiquidGlassSurface : FrameworkElement, IDisposable
     private sealed record SceneStamp(ulong Hash, int SourceWidth, int SourceHeight, int Width, int Height,
         double OffsetX, double OffsetY, double PlacementWidth, double PlacementHeight, uint Background, double Radius, double Clarity, bool Dark);
     private SceneStamp? lastScene;
+    private readonly BackdropRefreshCadence cadence = new();
+    /// <summary>Optional material radius in DIPs, for the Dock's independent silhouette.</summary>
+    public double? CornerRadiusOverride { get; set; }
     public double LastRenderMilliseconds { get; private set; }
     public string SourceKind { get; private set; } = "System backdrop";
 
@@ -71,25 +74,34 @@ internal sealed class LiquidGlassSurface : FrameworkElement, IDisposable
         }
         ReleaseFrame();
     }
-    private void GeometryChanged(object? sender, EventArgs e) => Refresh();
-    private void SizeChangedOnHost(object sender, SizeChangedEventArgs e) => Refresh();
-    private void Activated(object? sender, EventArgs e) { wallpaper.Refresh(); Refresh(); }
+    private void GeometryChanged(object? sender, EventArgs e) { cadence.Reset(); Refresh(); }
+    private void SizeChangedOnHost(object sender, SizeChangedEventArgs e) { cadence.Reset(); Refresh(); }
+    private void Activated(object? sender, EventArgs e) { cadence.Reset(); wallpaper.Refresh(); Refresh(); }
     private void ActivityChanged(object? sender, EventArgs e) => UpdateActivity();
-    private void MouseActivity(object sender, MouseEventArgs e) => UpdateActivity();
+    private void MouseActivity(object sender, MouseEventArgs e) { cadence.Reset(); UpdateActivity(); }
     private void LiveTick(object? sender, EventArgs e) { if (pending == null) Refresh(); }
     private void UpdateActivity()
     {
         var active = host is DockWindow ? host.IsMouseOver : host.IsActive;
         var enabled = IsVisible && active && SourceKind == "Captured backdrop" && controller.State.Settings.LiveGlass && controller.State.Settings.LiquidGlass && !controller.ReducedMotion && !SystemParameters.HighContrast;
-        if (enabled) live.Start(); else live.Stop();
+        if (enabled)
+        {
+            var interval = TimeSpan.FromMilliseconds(cadence.DelayMilliseconds);
+            if (live.Interval != interval) live.Interval = interval;
+            if (!live.IsEnabled) live.Start();
+        }
+        else live.Stop();
     }
-    private void WallpaperChanged(object? sender, EventArgs e) => Refresh();
+    private void WallpaperChanged(object? sender, EventArgs e) { cadence.Reset(); Refresh(); }
     private void HostClosed(object? sender, EventArgs e) => Dispose();
 
     public void Refresh()
     {
         if (disposed) return;
-        Opacity = host is DockWindow ? Math.Clamp((controller.State.Settings.Opacity - .55) / .45, .12, 1) : 1;
+        // The sampled frame already contains the backdrop and its optical tint.
+        // Dock opacity is applied by the plate overlay, never by fading this frame
+        // over an opaque underlay (which would invert the transparency control).
+        Opacity = 1;
         UpdateActivity();
         if (!IsVisible || ActualWidth < 10 || ActualHeight < 10 || controller.State.Settings.PowerSaver || SystemParameters.HighContrast || !controller.State.Settings.LiquidGlass)
         { ReleaseFrame(); return; }
@@ -98,7 +110,7 @@ internal sealed class LiquidGlassSurface : FrameworkElement, IDisposable
     private void ReleaseFrame()
     {
         throttle.Stop(); live.Stop(); generation++;
-        pending?.Cancel(); frame = null; lastScene = null; InvalidateVisual();
+        pending?.Cancel(); frame = null; lastScene = null; cadence.Reset(); InvalidateVisual();
     }
     private async void RenderTick(object? sender, EventArgs e)
     {
@@ -115,7 +127,7 @@ internal sealed class LiquidGlassSurface : FrameworkElement, IDisposable
         var token = pending.Token;
         var dark = Theme.IsDark;
         var clarity = controller.State.Settings.GlassClarity;
-        var radius = controller.State.Settings.CornerRadius * dpi.DpiScaleX;
+        var radius = (CornerRadiusOverride ?? controller.State.Settings.CornerRadius) * dpi.DpiScaleX;
         var scale = Math.Min(1, Math.Sqrt(360_000 / Math.Max(1, physicalWidth * physicalHeight)));
         var width = Math.Max(1, (int)Math.Ceiling(physicalWidth * scale));
         var height = Math.Max(1, (int)Math.Ceiling(physicalHeight * scale));
@@ -152,6 +164,7 @@ internal sealed class LiquidGlassSurface : FrameworkElement, IDisposable
                 return (Pixels: (byte[]?)pixels, Kind: kind, Stamp: (SceneStamp?)stamp);
             }, token);
             if (disposed || token.IsCancellationRequested || thisGeneration != generation) return;
+            cadence.Observe(bitmap.Pixels != null);
             LastRenderMilliseconds = watch.Elapsed.TotalMilliseconds;
             if (bitmap.Pixels != null)
             {

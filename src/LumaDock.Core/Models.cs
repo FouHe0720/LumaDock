@@ -28,6 +28,7 @@ public sealed class DockSettings
     public double CornerRadius { get; set; } = 24;
     public double IconSize { get; set; } = 48;
     public double Spacing { get; set; } = 10;
+    public string DockShape { get; set; } = "Capsule";
     public string Position { get; set; } = "Bottom";
     public bool AutoHide { get; set; }
     public double AnimationStrength { get; set; } = .45;

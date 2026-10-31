@@ -83,6 +83,21 @@ internal static class Program
                     var after = GetGuiResources(Process.GetCurrentProcess().Handle, 0);
                     Require(after <= baseline + 2, $"GDI objects grew from {baseline} to {after}");
                 });
+                await Test("A layered transparent Dock surface is excluded and its capture affinity restored", async () =>
+                {
+                    var layered = Window(Orange, ready.Left + 50, ready.Top + 40, 160, 100);
+                    layered.AllowsTransparency = true;
+                    try
+                    {
+                        layered.Show(); await app.Dispatcher.InvokeAsync(() => { }, DispatcherPriority.ApplicationIdle); await Task.Delay(120);
+                        var layeredHandle = new WindowInteropHelper(layered).Handle;
+                        Require(GetWindowDisplayAffinity(layeredHandle, out var before), "Layered window affinity is unreadable");
+                        var frame = await Task.Run(() => BackdropSampler.Capture(left, top, 48, 48, new[] { own, layeredHandle }));
+                        Require(frame != null, BackdropSampler.LastFailure ?? "Layered exclusion failed"); CheckBlue(frame!);
+                        Require(GetWindowDisplayAffinity(layeredHandle, out var after) && before == after, "Layered affinity was not restored");
+                    }
+                    finally { layered.Close(); }
+                });
                 code = failed == 0 && errors.Count == 0 ? 0 : 1;
             }
             catch (Exception error) { failed++; errors.Add(error.GetType().Name + ":" + error.Message); }

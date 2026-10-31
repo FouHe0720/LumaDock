@@ -149,6 +149,45 @@ internal static class Program
                 controller.State.Settings.NameFontSize = 18;
                 controller.State.Settings.NameFontItalic = true;
                 controller.ApplySettings(); window.Navigate("Settings"); await Frame();
+                window.Width = window.MinWidth; await Frame();
+                Test("All six palette controls fit at the minimum supported window width", () =>
+                {
+                    var swatches = Descendants<Button>(window).Where(button => button.Tag is string tag && tag.StartsWith("Accent:")).ToArray();
+                    Require(swatches.Length == 6, "The complete six-color palette was not exposed.");
+                    var palette = Ancestor<WrapPanel>(swatches[0])!;
+                    Require(palette.ActualWidth <= 322.5, "Palette exceeds its settings column.");
+                    foreach (var button in swatches)
+                    {
+                        var point = button.TranslatePoint(new Point(), palette);
+                        Require(point.X >= -.5 && point.X + button.ActualWidth <= palette.ActualWidth + .5, "A color control extends beyond its palette.");
+                    }
+                });
+                foreach (var value in new[] { "Rose", "Graphite" })
+                {
+                    var swatch = Descendants<Button>(window).Single(button => Equals(button.Tag, "Accent:" + value));
+                    swatch.RaiseEvent(new RoutedEventArgs(Button.ClickEvent)); await Frame();
+                    Test(value + " palette applies through its actual settings action", () =>
+                    {
+                        var expected = value == "Rose" ? (Color)ColorConverter.ConvertFromString("#A24F68") : (Color)ColorConverter.ConvertFromString("#4E6071");
+                        var darkExpected = value == "Rose" ? (Color)ColorConverter.ConvertFromString("#F3BDC8") : (Color)ColorConverter.ConvertFromString("#D2DCE3");
+                        var actual = ((SolidColorBrush)Application.Current.Resources["AccentBrush"]).Color;
+                        Require(actual == expected || actual == darkExpected, "The selected color did not reach the real theme resources.");
+                        Require(new StateStore(dataPath).Load().Settings.Accent == value, "The selected color was not saved.");
+                        Require(System.Windows.Automation.AutomationProperties.GetItemStatus(swatch) == "已选择", "The selected palette state was not exposed.");
+                    });
+                }
+                foreach (var value in new[] { "Capsule", "Pebble", "Rail" })
+                {
+                    var shape = Descendants<Button>(window).Single(button => Equals(button.Tag, "DockShape:" + value));
+                    shape.RaiseEvent(new RoutedEventArgs(Button.ClickEvent)); await Frame();
+                    Test(value + " Dock silhouette applies and persists through its actual settings action", () =>
+                    {
+                        Require(controller.State.Settings.DockShape == value && new StateStore(dataPath).Load().Settings.DockShape == value, "The selected silhouette was not applied and saved.");
+                        var selected = Descendants<Button>(window).Where(button => button.Tag is string tag && tag.StartsWith("DockShape:") && System.Windows.Automation.AutomationProperties.GetItemStatus(button) == "已选择").ToArray();
+                        Require(selected.Length == 1 && ReferenceEquals(selected[0], shape), "The selected silhouette state is ambiguous.");
+                    });
+                }
+                window.Width = 1120; await Frame();
                 var textJump = Descendants<Button>(window).Single(button => Equals(button.Content, "文字"));
                 textJump.RaiseEvent(new RoutedEventArgs(Button.ClickEvent)); await Frame();
                 Test("The text shortcut positions the font section at the top of its viewport", () =>

@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Security.Cryptography;
 using System.Text.Json;
 using LumaDock.Core;
 
@@ -132,12 +133,38 @@ Test("Interior diffusion preserves the curved rim and its premultiplied alpha", 
     for (var offset = 0; offset < large.Length; offset += 4)
         Require(large[offset] <= large[offset + 3] && large[offset + 1] <= large[offset + 3] && large[offset + 2] <= large[offset + 3], "Interior diffusion produced invalid premultiplied alpha.");
 });
+Test("Thin Dock sampling matches the original scalar pixels across light, dark, rounded and vertical surfaces", () =>
+{
+    var source = Fixture(1024, 1024, (x, y) => (x * 17 + y * 11, x * 7 + y * 13, x * 3 + y * 23, x * 11 + y * 7));
+    var display = new WallpaperPlacement(-140, -50, 2560, 1440, false, 20, 40, 80);
+    // Full-output digests were recorded from the unoptimized scalar renderer,
+    // including the curved caps, fractional alpha and the four softened samples.
+    var references = new[] {
+        (720, 64, 32d, .65, true, "97D250D6F1ADA905337EF22BDEA33097027EB28132038618D2C8520F3ABF2750"),
+        (64, 720, 32d, .65, true, "6B7E788DEFC2AB84FDBB256D79FF8875CBA4B1F8C8D38030E4F7DFEB5E983516"),
+        (799, 79, 24d, .3, false, "2093889C2954AD8E7B0153EF909DBD9494547F829C521B1052C4C43407358868"),
+        (159, 68, 0d, .65, true, "72DE9BFA64B174E677C94A45223EBB81B46C3A9C45764385B6E434C3DA5BDB56"),
+        (600, 72, 24d, .65, false, "49B982E6DA772D51FBBC06D569D301D8F08039D99D3C51B32032B60385AFC97D")
+    };
+    foreach (var (width, height, radius, clarity, dark, digest) in references)
+    {
+        var actual = LiquidLensRenderer.Render(source, display, new(400, 600, width, height), width, height, radius, dark, clarity);
+        Require(Convert.ToHexString(SHA256.HashData(actual)) == digest, $"The {width}x{height} Dock's pixels changed.");
+    }
+    var fractional = LiquidLensRenderer.Render(source, display with { Tile = true },
+        new(482, 685, 101.88495063962645, 13.174778099951697), 116, 15,
+        .10301910754804844, false, .539717807685825);
+    Require(Convert.ToHexString(SHA256.HashData(fractional)) == "CDEC0AD208B4377A04D7432C2B9E8A2553E90D6F27A24B1D40028739FCEF96E3",
+        "Fractional scaling changed the normal chosen at the Dock's medial axis.");
+});
 Test("A cancelled render stops instead of returning a partial bitmap", () =>
 {
     using var cancelled = new CancellationTokenSource(); cancelled.Cancel();
     Throws<OperationCanceledException>(() => LiquidLensRenderer.Render(checker, placement, new(0, 0, 400, 400), 400, 400, 20, true, .8, cancelled.Token));
     using var midRender = new CancellationTokenSource(); midRender.CancelAfter(1);
     Throws<OperationCanceledException>(() => LiquidLensRenderer.Render(checker, placement, new(0, 0, 1920, 1080), 1920, 1080, 24, true, .5, midRender.Token));
+    using var midStrip = new CancellationTokenSource(); midStrip.CancelAfter(1);
+    Throws<OperationCanceledException>(() => LiquidLensRenderer.Render(checker, placement, new(0, 0, 8192, 79), 8192, 79, 24, true, .5, midStrip.Token));
 });
 Test("Invalid dimensions and oversized output are rejected before allocation", () =>
 {
@@ -197,12 +224,31 @@ var softRuntimeBenchmark = new
     outputBytes = softRuntimeBuffer.Length, warmJit = true, fixtureOnly = true,
     description = "Two separable running-sum box passes on the interior, with an unchanged refracting rim. Pool buffers may be cold."
 };
+var dockTimes = new List<double>();
+long dockAllocation = 0;
+for (var i = 0; i < 4; i++) LiquidLensRenderer.Render(checker, placement, new(100, 100, 720, 64), 720, 64, 32, true, .65);
+for (var i = 0; i < 30; i++)
+{
+    beforeAllocation = GC.GetAllocatedBytesForCurrentThread(); timer.Restart();
+    var dockBuffer = LiquidLensRenderer.Render(checker, placement, new(100, 100, 720, 64), 720, 64, 32, true, .65);
+    timer.Stop(); dockAllocation += GC.GetAllocatedBytesForCurrentThread() - beforeAllocation;
+    dockTimes.Add(timer.Elapsed.TotalMilliseconds); GC.KeepAlive(dockBuffer);
+}
+dockTimes.Sort();
+var dockBenchmark = new
+{
+    outputWidth = 720, outputHeight = 64, outputPixels = 720 * 64, clarity = .65, dark = true,
+    medianElapsedMs = (dockTimes[14] + dockTimes[15]) / 2, rounds = 30,
+    allocatedBytesPerFrameCurrentThread = dockAllocation / 30,
+    outputBytes = 720 * 64 * 4, warmJit = true, scratchPoolWarm = true, fixtureOnly = true,
+    description = "Same four bilinear softened samples and scalar optical result; one bounded pooled coordinate table. Native capture and WPF excluded."
+};
 var reportIndex = Array.IndexOf(args, "--report");
 var reportPath = Path.GetFullPath(reportIndex >= 0 && reportIndex + 1 < args.Length ? args[reportIndex + 1] : "artifacts/tests/lens-results.json");
 Directory.CreateDirectory(Path.GetDirectoryName(reportPath)!);
 var passed = tests.Count(t => t.Passed);
-File.WriteAllText(reportPath, JsonSerializer.Serialize(new { recordedAtUtc = DateTimeOffset.UtcNow, passed, failed = tests.Count - passed, syntheticFixturesOnly = true, tests, benchmark, runtimeBenchmark, softRuntimeBenchmark }, new JsonSerializerOptions { WriteIndented = true }));
-Console.WriteLine($"{passed}/{tests.Count} lens tests passed. 806400 pixels: {benchmark.elapsedMs:F2} ms; 360000 pixels: {runtimeBenchmark.elapsedMs:F2} ms; soft .65 360000 pixels: {softRuntimeBenchmark.elapsedMs:F2} ms.");
+File.WriteAllText(reportPath, JsonSerializer.Serialize(new { recordedAtUtc = DateTimeOffset.UtcNow, passed, failed = tests.Count - passed, syntheticFixturesOnly = true, tests, benchmark, runtimeBenchmark, softRuntimeBenchmark, dockBenchmark }, new JsonSerializerOptions { WriteIndented = true }));
+Console.WriteLine($"{passed}/{tests.Count} lens tests passed. 806400 pixels: {benchmark.elapsedMs:F2} ms; 360000 pixels: {runtimeBenchmark.elapsedMs:F2} ms; soft .65 360000 pixels: {softRuntimeBenchmark.elapsedMs:F2} ms; 720x64 Dock median: {dockBenchmark.medianElapsedMs:F2} ms.");
 return passed == tests.Count ? 0 : 1;
 
 static LensSource Fixture(int width, int height, Func<int, int, (int B, int G, int R, int A)> colour)

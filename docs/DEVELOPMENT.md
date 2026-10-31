@@ -58,9 +58,11 @@ WSL 可用于编辑文件，但 Linux 构建结果不能代替 Windows WPF 编�
 | `scripts/test.ps1` | Core / Storage 契约与损坏恢复 | .NET SDK |
 | `scripts/test-lens.ps1` | 像素折射、柔化、边界和取消 | .NET SDK |
 | `scripts/test-layout.ps1` | 大字、自适应网格和边界输入 | .NET SDK |
+| `scripts/test-cadence.ps1` | 背景采样退避、变化恢复与重置 | .NET SDK |
 | `scripts/test-windows.ps1` | Shell、真实图标、显示器和窗口身份 | Windows 交互会话 |
 | `scripts/test-font.ps1` | 系统图标字体读取与释放 | Windows |
 | `scripts/test-typography-ui.ps1` | 实际 WPF 字体、预览、导航与流光停止 | Windows 交互会话 |
+| `scripts/test-dock-ui.ps1` | Dock 四边与三轮廓、放大边界、命中、滚动与动画停止 | Windows 交互会话 |
 | `scripts/test-ui.ps1` | 窗口循环、重建和开合回归 | Windows 交互会话 |
 | `scripts/test-activation.ps1` | 多进程单实例激活 | Windows |
 | `scripts/test-backdrop.ps1` | 原生背景属性与回退 | Windows 交互会话 |
@@ -69,7 +71,7 @@ WSL 可用于编辑文件，但 Linux 构建结果不能代替 Windows WPF 编�
 
 各脚本生成 JSON 报告至 `artifacts/tests`。交互测试不应与性能采样同时运行。测试计数、日期和边界见 [验证记录](validation.md)；不能把编译通过或短测通过写成所有硬件、游戏及长期驻留验收完成。
 
-GitHub Actions 使用 Windows runner 构建整个解决方案，执行确定性的 Core/Storage、图像与布局组件测试，并生成便携包。CI 不执行真实交互桌面或性能验收，结果见 [Actions](https://github.com/FouHe0720/LumaDock/actions)。
+GitHub Actions 使用 Windows runner 构建整个解决方案，执行确定性的 Core/Storage、图像、布局与采样节奏组件测试，并生成便携包。CI 不执行真实交互桌面或性能验收，结果见 [Actions](https://github.com/FouHe0720/LumaDock/actions)。
 
 ## 生成便携包
 

@@ -35,6 +35,8 @@ internal static class Theme
             ("Jade", true) => "#28785F", ("Jade", false) => "#9CDBBE",
             ("Amber", true) => "#9B641F", ("Amber", false) => "#F2C887",
             ("Iris", true) => "#7757AB", ("Iris", false) => "#CEB8EF",
+            ("Rose", true) => "#A24F68", ("Rose", false) => "#F3BDC8",
+            ("Graphite", true) => "#4E6071", ("Graphite", false) => "#D2DCE3",
             (_, true) => "#3579B3", _ => "#A1D3F5"
         };
         AccentColor = (Color)ColorConverter.ConvertFromString(accentHex);

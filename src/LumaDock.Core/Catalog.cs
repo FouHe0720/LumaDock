@@ -64,7 +64,8 @@ public static class Catalog
         s.Opacity = double.IsFinite(s.Opacity) ? Math.Clamp(s.Opacity, .55, 1) : .88;
         s.GlassClarity = double.IsFinite(s.GlassClarity) ? Math.Clamp(s.GlassClarity, .1, 1) : .65;
         s.GlassFlowStrength = double.IsFinite(s.GlassFlowStrength) ? Math.Clamp(s.GlassFlowStrength, 0, 1) : .45;
-        if (!new[] { "Lagoon", "Jade", "Amber", "Iris" }.Contains(s.Accent)) s.Accent = "Lagoon";
+        if (!new[] { "Lagoon", "Jade", "Amber", "Iris", "Rose", "Graphite" }.Contains(s.Accent)) s.Accent = "Lagoon";
+        if (!new[] { "Capsule", "Pebble", "Rail" }.Contains(s.DockShape)) s.DockShape = "Capsule";
         s.IconSize = double.IsFinite(s.IconSize) ? Math.Clamp(s.IconSize, 32, 80) : 48;
         s.Spacing = double.IsFinite(s.Spacing) ? Math.Clamp(s.Spacing, 4, 24) : 10;
         s.CornerRadius = double.IsFinite(s.CornerRadius) ? Math.Clamp(s.CornerRadius, 0, 40) : 24;

@@ -120,10 +120,11 @@ public sealed class AppController : IDisposable
         thread.SetApartmentState(ApartmentState.STA); thread.Start(); return result.Task;
     }
 
-    public Task<BitmapSource?> GetIconAsync(AppEntry entry) => icons.GetAsync(entry, 80);
-    public void Save()
+    public Task<BitmapSource?> GetIconAsync(AppEntry entry, int physicalPixels = 80) => icons.GetAsync(entry, physicalPixels);
+    public void Save() => Persist(true);
+    private void Persist(bool rebuildDock)
     {
-        try { store.Save(State); Changed?.Invoke(this, EventArgs.Empty); dock?.Rebuild(); }
+        try { store.Save(State); Changed?.Invoke(this, EventArgs.Empty); if (rebuildDock) dock?.Rebuild(); }
         catch (Exception ex) { Log.Write("Save failed", ex); Notify("配置保存失败：" + ex.Message); }
     }
     public void Pin(AppEntry app) { app.Hidden = false; if (!State.PinnedIds.Contains(app.Id)) State.PinnedIds.Add(app.Id); Save(); }
@@ -183,7 +184,7 @@ public sealed class AppController : IDisposable
         catch (Exception e) { Log.Write("Diagnostics write failed", e); }
     }
     public void RestartDock() { dock?.Close(); dock = new(this); dock.Show(); }
-    public void ApplySettings() { Catalog.Normalize(State); Theme.Apply(State.Settings.Theme, State.Settings.Accent); ApplyNameFont(); dock?.UpdateSettings(); Save(); }
+    public void ApplySettings() { Catalog.Normalize(State); Theme.Apply(State.Settings.Theme, State.Settings.Accent); ApplyNameFont(); dock?.UpdateSettings(); Persist(false); }
     public void Export(string path) => StateStore.Export(State, path);
     public void Import(string path)
     {
