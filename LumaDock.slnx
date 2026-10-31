@@ -1,0 +1,21 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/LumaDock.App/LumaDock.App.csproj" />
+    <Project Path="src/LumaDock.Core/LumaDock.Core.csproj" />
+    <Project Path="src/LumaDock.Storage/LumaDock.Storage.csproj" />
+    <Project Path="src/LumaDock.Windows/LumaDock.Windows.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/LumaDock.Activation.Tests/LumaDock.Activation.Tests.csproj" />
+    <Project Path="tests/LumaDock.Backdrop.Tests/LumaDock.Backdrop.Tests.csproj" />
+    <Project Path="tests/LumaDock.Font.Tests/LumaDock.Font.Tests.csproj" />
+    <Project Path="tests/LumaDock.Layout.Tests/LumaDock.Layout.Tests.csproj" />
+    <Project Path="tests/LumaDock.Lens.Tests/LumaDock.Lens.Tests.csproj" />
+    <Project Path="tests/LumaDock.Sampler.Tests/LumaDock.Sampler.Tests.csproj" />
+    <Project Path="tests/LumaDock.Tests/LumaDock.Tests.csproj" />
+    <Project Path="tests/LumaDock.Typography.Ui.Tests/LumaDock.Typography.Ui.Tests.csproj" />
+    <Project Path="tests/LumaDock.Ui.Tests/LumaDock.Ui.Tests.csproj" />
+    <Project Path="tests/LumaDock.Wallpaper.Tests/LumaDock.Wallpaper.Tests.csproj" />
+    <Project Path="tests/LumaDock.Windows.Tests/LumaDock.Windows.Tests.csproj" />
+  </Folder>
+</Solution>

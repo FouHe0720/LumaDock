@@ -1,0 +1,33 @@
+{
+  "SchemaVersion": 1,
+  "Apps": [],
+  "PinnedIds": [],
+  "Categories": ["开发工具", "办公学习", "浏览器", "影音娱乐", "系统工具", "游戏", "其他"],
+  "Settings": {
+    "Theme": "System",
+    "Opacity": 0.88,
+    "LiquidGlass": true,
+    "LiveGlass": true,
+    "GlassClarity": 0.65,
+    "GlassMotion": true,
+    "GlassFlowStrength": 0.45,
+    "Accent": "Lagoon",
+    "CornerRadius": 24,
+    "IconSize": 48,
+    "Spacing": 10,
+    "Position": "Bottom",
+    "AutoHide": false,
+    "AnimationStrength": 0.45,
+    "Animations": true,
+    "PowerSaver": false,
+    "MonitorDevice": "",
+    "Columns": 6,
+    "FollowSystemIconFont": true,
+    "NameFontSize": 15,
+    "NameFontBold": false,
+    "NameFontFamily": "",
+    "NameFontItalic": false,
+    "StartWithWindows": false,
+    "CloseToTray": true
+  }
+}

@@ -1,0 +1,6 @@
+<Project Sdk="Microsoft.NET.Sdk">
+ <PropertyGroup><TargetFramework>net10.0-windows</TargetFramework><OutputType>WinExe</OutputType><UseWPF>true</UseWPF><UseWindowsForms>true</UseWindowsForms><ApplicationManifest>app.manifest</ApplicationManifest><AssemblyName>LumaDock</AssemblyName><RootNamespace>LumaDock.App</RootNamespace><StartupObject>LumaDock.App.Program</StartupObject><EnableDefaultApplicationDefinition>false</EnableDefaultApplicationDefinition><PlatformTarget>x64</PlatformTarget><NoWarn>$(NoWarn);WFO0003</NoWarn></PropertyGroup>
+ <PropertyGroup><ApplicationIcon>Assets/LumaDock.ico</ApplicationIcon></PropertyGroup>
+ <ItemGroup><Resource Include="Assets/LumaDock.ico"/></ItemGroup>
+ <ItemGroup><ProjectReference Include="../LumaDock.Core/LumaDock.Core.csproj"/><ProjectReference Include="../LumaDock.Windows/LumaDock.Windows.csproj"/><ProjectReference Include="../LumaDock.Storage/LumaDock.Storage.csproj"/></ItemGroup>
+<ItemGroup><Using Remove="System.Windows.Forms"/><Using Remove="System.Drawing"/></ItemGroup></Project>
