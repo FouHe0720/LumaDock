@@ -59,6 +59,9 @@ public sealed class ControlCenterWindow : Window
     });
     private TextBlock? _fontPreview;
     private TextBlock? _fontPreviewInfo;
+    private StackPanel? _settingsRoot;
+    private StackPanel? _settingsGroup;
+    private readonly Dictionary<string, TextBlock> _categoryCounts = new(StringComparer.Ordinal);
     private double _settingsScrollOffset;
     private TextBlock _title = new();
     private TextBlock _subtitle = new();
@@ -176,15 +179,16 @@ public sealed class ControlCenterWindow : Window
         var chrome = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Center };
         chrome.Children.Add(ChromeButton("\uE921", "最小化", () => WindowState = WindowState.Minimized));
         chrome.Children.Add(ChromeButton("\uE8BB", "关闭", () => Close())); header.Children.Add(chrome);
-        var sideBorder = new Border { BorderThickness = new Thickness(0, .5, .5, 0), Padding = new Thickness(14, 24, 14, 22), CornerRadius = new CornerRadius(0, 0, 0, 24) };
+        var sideBorder = new Border { BorderThickness = new Thickness(0, .5, .5, 0), Padding = new Thickness(10, 21, 10, 22), CornerRadius = new CornerRadius(0, 0, 0, 24) };
         sideBorder.SetResourceReference(Border.BorderBrushProperty, "BorderBrush"); sideBorder.SetResourceReference(Border.BackgroundProperty, "SidebarBrush");
         Grid.SetRow(sideBorder, 1); _frame.Children.Add(sideBorder);
         var sideGrid = new Grid(); sideGrid.RowDefinitions.Add(new RowDefinition()); sideGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         sideBorder.Child = sideGrid; sideGrid.Children.Add(_sidebar);
         var footer = new StackPanel(); Grid.SetRow(footer, 1); sideGrid.Children.Add(footer);
-        var shortcut = Text("Ctrl + Alt + Space", 10, FontWeights.Normal, true); shortcut.Margin = new Thickness(12, 0, 0, 10);
-        footer.Children.Add(shortcut);
-        var version = Text(typeof(AppController).Assembly.GetName().Version?.ToString(3) ?? "0.4.0", 10, FontWeights.Normal, true); version.Margin = new Thickness(12, 0, 0, 0); footer.Children.Add(version);
+        var shortcut = Text("Ctrl + Alt + Space", 10, FontWeights.Normal, true);
+        var shortcutCard = new Border { CornerRadius = new CornerRadius(7, 12, 7, 12), Padding = new Thickness(9, 7, 9, 7), Margin = new Thickness(7, 0, 7, 11), Child = shortcut };
+        shortcutCard.SetResourceReference(Border.BackgroundProperty, "CardBrush"); footer.Children.Add(shortcutCard);
+        var version = Text("v" + (typeof(AppController).Assembly.GetName().Version?.ToString(3) ?? "0.6.0"), 10, FontWeights.Normal, true); version.Margin = new Thickness(16, 0, 0, 0); footer.Children.Add(version);
         _body.Margin = new Thickness(38, 24, 38, 24);
         Grid.SetRow(_body, 1); Grid.SetColumn(_body, 1); _frame.Children.Add(_body);
         _body.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
@@ -203,6 +207,8 @@ public sealed class ControlCenterWindow : Window
     private void Render()
     {
         _fontPreview = null; _fontPreviewInfo = null;
+        _settingsRoot = null; _settingsGroup = null;
+        _categoryCounts.Clear();
         WindowBackdrop.Refresh(this, Theme.IsDark, _controller.State.Settings.PowerSaver);
         _shell.CornerRadius = new CornerRadius(_controller.State.Settings.CornerRadius);
         _glassRim.Radius = _controller.State.Settings.CornerRadius;
@@ -212,11 +218,14 @@ public sealed class ControlCenterWindow : Window
         _title = new(); _subtitle = new() { Visibility = Visibility.Collapsed };
         _tools = new() { Orientation = Orientation.Horizontal };
         _categories = new() { Margin = new Thickness(0, 0, 0, 18) };
-        var heading = new Grid { Margin = new Thickness(0, 0, 0, 25) };
+        var heading = new Grid { Margin = new Thickness(0, 0, 0, 23) };
         heading.ColumnDefinitions.Add(new ColumnDefinition()); heading.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         var words = new StackPanel(); _title.FontSize = 28; _title.FontWeight = FontWeights.SemiBold; _title.FontFamily = new FontFamily("Segoe UI Variable Display, Microsoft YaHei UI");
         _subtitle.SetResourceReference(TextBlock.ForegroundProperty, "MutedBrush"); _subtitle.FontSize = 12;
-        words.Children.Add(_title); words.Children.Add(_subtitle); heading.Children.Add(words); Grid.SetColumn(_tools, 1); heading.Children.Add(_tools); _body.Children.Add(heading);
+        words.Children.Add(_title); words.Children.Add(_subtitle); heading.Children.Add(words);
+        var toolRail = new Border { CornerRadius = new CornerRadius(10, 19, 10, 19), Padding = new Thickness(3), Margin = new Thickness(18, 0, 0, 0), BorderThickness = new Thickness(.6), VerticalAlignment = VerticalAlignment.Center, Child = _tools };
+        toolRail.SetResourceReference(Border.BackgroundProperty, "CardBrush"); toolRail.SetResourceReference(Border.BorderBrushProperty, "GlassHighlightBrush");
+        Grid.SetColumn(toolRail, 1); heading.Children.Add(toolRail); _body.Children.Add(heading);
         _status.SetResourceReference(TextBlock.ForegroundProperty, "MutedBrush"); _status.FontSize = 10.5; _status.Margin = new Thickness(0, 15, 0, 0); Grid.SetRow(_status, 3); _body.Children.Add(_status);
         switch (_section)
         {
@@ -224,25 +233,41 @@ public sealed class ControlCenterWindow : Window
             case "About": BuildAbout(); break;
             default: BuildApps(_section == "Desktop"); break;
         }
+        toolRail.Visibility = _tools.Children.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
     }
 
     private void BuildSidebar()
     {
         _sidebar.Children.Clear();
+        AddNavCaption("工作区");
         AddNav("Launchpad", "\uE71D", "应用库"); AddNav("Desktop", "\uE8FC", "桌面集");
-        var divider = new Border { Height = .5, Margin = new Thickness(12, 17, 12, 21) }; divider.SetResourceReference(Border.BackgroundProperty, "BorderBrush"); _sidebar.Children.Add(divider);
+        var divider = new Border { Height = .5, Margin = new Thickness(16, 16, 16, 19) }; divider.SetResourceReference(Border.BackgroundProperty, "BorderBrush"); _sidebar.Children.Add(divider);
+        AddNavCaption("选项");
         AddNav("Settings", "\uE713", "偏好设置"); AddNav("About", "\uE946", "关于");
+    }
+
+    private void AddNavCaption(string label)
+    {
+        var caption = Text(label, 10, FontWeights.Medium, true); caption.Margin = new Thickness(16, 0, 0, 12);
+        caption.SetResourceReference(TextBlock.ForegroundProperty, "CaptionBrush"); _sidebar.Children.Add(caption);
     }
 
     private void AddNav(string section, string glyph, string label)
     {
         var button = ActionButton(label, () => { _section = section; _page = 0; Render(); });
-        var content = new Grid { Width = 116 }; content.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(29) }); content.ColumnDefinitions.Add(new ColumnDefinition());
-        var icon = Glyph(glyph, 16); icon.VerticalAlignment = VerticalAlignment.Center; content.Children.Add(icon);
-        var name = Text(label, 13); name.VerticalAlignment = VerticalAlignment.Center; Grid.SetColumn(name, 1); content.Children.Add(name); button.Content = content;
+        var selected = _section == section;
+        var content = new Grid { Width = 128 }; content.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(9) }); content.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(34) }); content.ColumnDefinitions.Add(new ColumnDefinition());
+        var spine = new Border { Width = 2.5, Height = 18, CornerRadius = new CornerRadius(1.25), HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Center, Visibility = selected ? Visibility.Visible : Visibility.Hidden };
+        spine.SetResourceReference(Border.BackgroundProperty, "AccentBrush"); content.Children.Add(spine);
+        var icon = Glyph(glyph, 14); icon.HorizontalAlignment = HorizontalAlignment.Center;
+        icon.SetResourceReference(TextBlock.ForegroundProperty, selected ? "AccentBrush" : "MutedBrush");
+        var badge = new Border { Width = 28, Height = 28, CornerRadius = new CornerRadius(8, 12, 8, 12), HorizontalAlignment = HorizontalAlignment.Left, Child = icon };
+        badge.SetResourceReference(Border.BackgroundProperty, selected ? "AccentSoftBrush" : "CardBrush"); Grid.SetColumn(badge, 1); content.Children.Add(badge);
+        var name = Text(label, 13, selected ? FontWeights.SemiBold : FontWeights.Normal); name.VerticalAlignment = VerticalAlignment.Center; Grid.SetColumn(name, 2); content.Children.Add(name); button.Content = content;
         System.Windows.Automation.AutomationProperties.SetName(button, label);
-        button.HorizontalContentAlignment = HorizontalAlignment.Left; button.Padding = new Thickness(13, 12, 4, 12); button.Margin = new Thickness(0, 0, 0, 7); button.Background = Brushes.Transparent; button.BorderBrush = Brushes.Transparent;
-        if (_section == section) { button.SetResourceReference(BackgroundProperty, "SelectionBrush"); button.SetResourceReference(BorderBrushProperty, "GlassHighlightBrush"); name.FontWeight = FontWeights.SemiBold; }
+        button.HorizontalContentAlignment = HorizontalAlignment.Left; button.Padding = new Thickness(9, 9, 10, 9); button.Margin = new Thickness(0, 0, 0, 8); button.Background = Brushes.Transparent; button.BorderBrush = Brushes.Transparent;
+        ApplyButtonTemplate(button, new CornerRadius(13, 23, 23, 13));
+        if (selected) { button.SetResourceReference(BackgroundProperty, "SelectionBrush"); button.SetResourceReference(BorderBrushProperty, "GlassHighlightBrush"); }
         _sidebar.Children.Add(button);
     }
 
@@ -253,7 +278,7 @@ public sealed class ControlCenterWindow : Window
         _tools.Children.Add(ActionButton("添加应用", AddApplication, true));
         _tools.Children.Add(ActionButton("刷新", async () => { try { _status.Text = "正在扫描应用…"; await _controller.RefreshAppsAsync(); Render(); } catch (Exception ex) { ShowError(ex); } }));
         var filters = new StackPanel(); Grid.SetRow(filters, 1); _body.Children.Add(filters);
-        var searchBox = new Border { CornerRadius = new CornerRadius(15), BorderThickness = new Thickness(.8), Padding = new Thickness(15, 11, 12, 11), Margin = new Thickness(0, 0, 0, 18) };
+        var searchBox = new Border { CornerRadius = new CornerRadius(12, 21, 12, 21), BorderThickness = new Thickness(.8), Padding = new Thickness(15, 12, 12, 12), Margin = new Thickness(0, 0, 0, 17) };
         searchBox.SetResourceReference(Border.BackgroundProperty, "PanelBrush"); searchBox.SetResourceReference(Border.BorderBrushProperty, "BorderBrush");
         var searchGrid = new Grid(); searchGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(27) }); searchGrid.ColumnDefinitions.Add(new ColumnDefinition()); searchGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         var glass = Glyph("\uE721", 16); glass.VerticalAlignment = VerticalAlignment.Center; glass.SetResourceReference(TextBlock.ForegroundProperty, "MutedBrush"); searchGrid.Children.Add(glass);
@@ -276,8 +301,14 @@ public sealed class ControlCenterWindow : Window
         foreach (var category in new[] { "全部应用", "Dock 已固定" }.Concat(_controller.State.Categories).Distinct())
         {
             var captured = category; var chip = ActionButton(category == "全部应用" ? "全部" : category == "Dock 已固定" ? "已固定" : category, () => { _category = captured; _page = 0; RenderAppGrid(desktop); UpdateCategoryStyles(); });
-            chip.Tag = category; chip.Padding = new Thickness(13, 7, 13, 7); chip.Margin = new Thickness(0, 0, 7, 7); chip.FontSize = 11;
-            ApplyButtonTemplate(chip, 16);
+            var label = category == "全部应用" ? "全部" : category == "Dock 已固定" ? "已固定" : category;
+            var chipContent = new StackPanel { Orientation = Orientation.Horizontal };
+            chipContent.Children.Add(Text(label, 11));
+            var count = Text("", 9, FontWeights.Medium, true); count.VerticalAlignment = VerticalAlignment.Center; count.Margin = new Thickness(7, 0, 0, 0); count.MinWidth = 8;
+            _categoryCounts[category] = count; chipContent.Children.Add(count); chip.Content = chipContent;
+            System.Windows.Automation.AutomationProperties.SetName(chip, label);
+            chip.Tag = category; chip.Padding = new Thickness(9, 7, 9, 7); chip.Margin = new Thickness(0, 0, 6, 7); chip.FontSize = 11;
+            ApplyButtonTemplate(chip, new CornerRadius(8, 15, 8, 15));
             if (category != "全部应用" && category != "Dock 已固定")
             {
                 chip.AllowDrop = true;
@@ -286,7 +317,10 @@ public sealed class ControlCenterWindow : Window
             }
             _categories.Children.Add(chip);
         }
-        var newGroup = ActionButton("新建分组", CreateCategory); newGroup.FontSize = 11; newGroup.Padding = new Thickness(13, 7, 13, 7); ApplyButtonTemplate(newGroup, 16); _categories.Children.Add(newGroup); filters.Children.Add(_categories); UpdateCategoryStyles();
+        var newGroup = ActionButton("新建分组", CreateCategory); newGroup.FontSize = 11; newGroup.Padding = new Thickness(10, 7, 10, 7);
+        var createContent = new StackPanel { Orientation = Orientation.Horizontal }; var plus = Glyph("\uE710", 10); plus.Margin = new Thickness(0, 0, 6, 0); createContent.Children.Add(plus); createContent.Children.Add(Text("分组", 11)); newGroup.Content = createContent;
+        System.Windows.Automation.AutomationProperties.SetName(newGroup, "新建分组");
+        ApplyButtonTemplate(newGroup, new CornerRadius(8, 15, 8, 15)); _categories.Children.Add(newGroup); filters.Children.Add(_categories); UpdateCategoryStyles();
         if (desktop)
         {
             _tools.Children.Add(ActionButton("桌面图标", ToggleDesktopIcons));
@@ -296,10 +330,23 @@ public sealed class ControlCenterWindow : Window
 
     private void UpdateCategoryStyles()
     {
+        var visible = _controller.State.Apps.Where(app => !app.Hidden);
+        if (_section == "Desktop") visible = visible.Where(IsDesktopEntry);
+        if (!string.IsNullOrWhiteSpace(_query)) visible = visible.Where(app => app.Name.Contains(_query, StringComparison.CurrentCultureIgnoreCase) || app.LaunchPath.Contains(_query, StringComparison.OrdinalIgnoreCase));
+        var source = visible.ToArray();
+        var categories = source.GroupBy(app => app.Category).ToDictionary(group => group.Key, group => group.Count(), StringComparer.Ordinal);
+        var pins = _controller.State.PinnedIds.ToHashSet(StringComparer.OrdinalIgnoreCase);
         foreach (var button in _categories.Children.OfType<Button>())
         {
-            button.SetResourceReference(BackgroundProperty, (string?)button.Tag == _category ? "SelectionBrush" : "PanelBrush");
-            button.FontWeight = (string?)button.Tag == _category ? FontWeights.SemiBold : FontWeights.Normal;
+            if (button.Tag is not string category) continue;
+            var selected = category == _category;
+            button.SetResourceReference(BackgroundProperty, selected ? "SelectionBrush" : "CardBrush");
+            button.SetResourceReference(BorderBrushProperty, selected ? "AccentBrush" : "GlassHighlightBrush");
+            button.FontWeight = selected ? FontWeights.SemiBold : FontWeights.Normal;
+            if (button.Content is StackPanel labelStack && labelStack.Children.OfType<TextBlock>().FirstOrDefault() is { } label) label.FontWeight = button.FontWeight;
+            var count = category == "全部应用" ? source.Length : category == "Dock 已固定" ? source.Count(app => pins.Contains(app.Id)) : categories.GetValueOrDefault(category);
+            if (_categoryCounts.TryGetValue(category, out var countText)) { countText.Text = count.ToString(); countText.SetResourceReference(TextBlock.ForegroundProperty, selected ? "TextBrush" : "CaptionBrush"); }
+            System.Windows.Automation.AutomationProperties.SetHelpText(button, $"{count} 个{(_section == "Desktop" ? "快捷方式" : "应用")}");
         }
     }
 
@@ -358,13 +405,14 @@ public sealed class ControlCenterWindow : Window
             var next = ActionButton("›", () => { _page++; RenderAppGrid(desktop); }); next.IsEnabled = _page < pages - 1; pager.Children.Add(next);
         }
         _status.Text = $"{apps.Count} 个{(desktop ? "快捷方式" : "应用")}  ·  已固定 {_controller.State.PinnedIds.Count}";
+        UpdateCategoryStyles();
     }
 
     private FrameworkElement CreateAppTile(AppEntry app, bool desktop, AppGridMetrics metrics)
     {
         var vm = new AppTileViewModel(app);
         var tile = new AppTileButton { Margin = new Thickness(5), Padding = new Thickness(7, 9, 7, 5), Height = metrics.TileHeight, Background = Brushes.Transparent, BorderThickness = new Thickness(0), Cursor = Cursors.Hand, DataContext = vm, ToolTip = app.Name };
-        ApplyButtonTemplate(tile, 18, tile: true);
+        ApplyButtonTemplate(tile, new CornerRadius(14, 23, 14, 23), tile: true);
         var content = new StackPanel { HorizontalAlignment = HorizontalAlignment.Stretch };
         var image = new Image { Width = 48, Height = 48, Stretch = Stretch.Uniform, SnapsToDevicePixels = true };
         RenderOptions.SetBitmapScalingMode(image, BitmapScalingMode.HighQuality); image.SetBinding(Image.SourceProperty, new Binding(nameof(AppTileViewModel.Icon)));
@@ -411,7 +459,7 @@ public sealed class ControlCenterWindow : Window
         var groups = new MenuItem { Header = "移到分组" };
         foreach (var category in _controller.State.Categories) { var captured = category; groups.Items.Add(Menu(category, () => { app.Category = captured; _controller.Save(); RenderAppGrid(desktop); })); }
         menu.Items.Add(groups);
-        if (desktop) menu.Items.Add(Menu("在应用中查看", () => { _section = "Launchpad"; _category = app.Category; _query = app.Name; Render(); }));
+        if (desktop) menu.Items.Add(Menu("在应用库中查看", () => { _section = "Launchpad"; _category = app.Category; _query = app.Name; Render(); }));
         menu.Items.Add(new Separator()); menu.Items.Add(Menu("删除管理记录…", () =>
         {
             if (MessageBox.Show(this, $"从 LumaDock 隐藏“{app.Name}”？\n应用、桌面快捷方式和原始文件都将保留。可在数据管理中恢复隐藏记录。", "删除管理记录", MessageBoxButton.OKCancel, MessageBoxImage.Question) == MessageBoxResult.OK)
@@ -455,6 +503,7 @@ public sealed class ControlCenterWindow : Window
         _fontPreview = null; _fontPreviewInfo = null;
         var previousOffset = _settingsScrollOffset;
         var stack = new StackPanel(); var scroll = new ScrollViewer { Content = stack, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled }; Grid.SetRow(scroll, 2); _body.Children.Add(scroll);
+        _settingsRoot = stack; _settingsGroup = null;
         scroll.Loaded += (_, _) => scroll.ScrollToVerticalOffset(previousOffset);
         scroll.ScrollChanged += (_, e) => _settingsScrollOffset = e.VerticalOffset;
         var settings = _controller.State.Settings;
@@ -478,7 +527,7 @@ public sealed class ControlCenterWindow : Window
         ToggleRow(stack, "自动隐藏", "鼠标靠近 Dock 边缘时重新显示", settings.AutoHide, value => settings.AutoHide = value);
         SliderRow(stack, "悬停放大强度", 0, 1, settings.AnimationStrength, value => settings.AnimationStrength = value, value => $"{value:P0}");
         var fontHeading = Section(stack, "名称字体", "只调整 LumaDock 中的应用名称，Windows 字体保持原样。");
-        ToggleRow(stack, "跟随 Windows 图标字体", "读取 changesize 等工具已应用的图标字体", settings.FollowSystemIconFont, value => { settings.FollowSystemIconFont = value; Dispatcher.BeginInvoke(() => Render()); });
+        ToggleRow(stack, "跟随 Windows 图标字体", "使用 Windows 当前的图标名称样式", settings.FollowSystemIconFont, value => { settings.FollowSystemIconFont = value; Dispatcher.BeginInvoke(() => Render()); });
         if (!settings.FollowSystemIconFont)
         {
             NameFontFamilyRow(stack);
@@ -511,11 +560,11 @@ public sealed class ControlCenterWindow : Window
             catch (Exception ex) { startup.IsChecked = !enable; ShowError(ex); }
         };
         Section(stack, "数据", "");
-        var actions = new WrapPanel { Margin = new Thickness(0, 12, 0, 24) }; stack.Children.Add(actions);
+        var actions = new WrapPanel { Margin = new Thickness(0, 12, 0, 4) }; SettingsContainer(stack).Children.Add(actions);
         actions.Children.Add(ActionButton("导出配置", () => { var dialog = new SaveFileDialog { Filter = "LumaDock JSON|*.json", FileName = "LumaDock-config.json" }; if (dialog.ShowDialog(this) == true) Safe(() => _controller.Export(dialog.FileName)); }));
         actions.Children.Add(ActionButton("导入配置…", () => { var dialog = new OpenFileDialog { Filter = "LumaDock JSON|*.json" }; if (dialog.ShowDialog(this) == true && MessageBox.Show(this, "用所选配置替换当前整理结果与偏好？\n开机启动和桌面显示设置不会随导入而更改。建议先导出当前配置。", "导入配置", MessageBoxButton.OKCancel, MessageBoxImage.Question) == MessageBoxResult.OK) Safe(() => { _controller.Import(dialog.FileName); Render(); }); }));
         actions.Children.Add(ActionButton("恢复默认值…", () => { if (MessageBox.Show(this, "恢复 LumaDock 默认配置？应用分组和 Dock 排列将重置。\n不会移动文件，也不会改变开机启动或桌面图标显示。", "恢复默认值", MessageBoxButton.OKCancel, MessageBoxImage.Question) == MessageBoxResult.OK) Safe(() => { _controller.Reset(); _category = "全部应用"; Render(); }); }));
-        void JumpTo(FrameworkElement heading) => scroll.ScrollToVerticalOffset(heading.TranslatePoint(new Point(), stack).Y);
+        void JumpTo(FrameworkElement heading) => scroll.ScrollToVerticalOffset(Math.Max(0, heading.TranslatePoint(new Point(), stack).Y - 18));
         _tools.Children.Add(ActionButton("材质", () => JumpTo(materialHeading)));
         _tools.Children.Add(ActionButton("文字", () => JumpTo(fontHeading)));
         _tools.Children.Add(ActionButton("Dock", () => JumpTo(dockHeading)));
@@ -538,7 +587,8 @@ public sealed class ControlCenterWindow : Window
         foreach (var color in colors)
         {
             var button = ActionButton("", () => { _controller.State.Settings.Accent = color.Value; SaveSettings(); UpdateSelection(); });
-            button.Tag = "Accent:" + color.Value; button.Width = 50; button.Padding = new Thickness(4, 8, 4, 6); button.Margin = new Thickness(0, 0, 6, 0);
+            button.Tag = "Accent:" + color.Value; button.Width = 48; button.Padding = new Thickness(4, 8, 4, 6); button.Margin = new Thickness(0, 0, 6, 0);
+            ApplyButtonTemplate(button, new CornerRadius(9, 16, 9, 16));
             var content = new StackPanel();
             content.Children.Add(new Ellipse { Width = 17, Height = 17, Fill = new SolidColorBrush((Color)ColorConverter.ConvertFromString(color.Color)), HorizontalAlignment = HorizontalAlignment.Center });
             var label = Text(color.Label, 10); label.HorizontalAlignment = HorizontalAlignment.Center; label.Margin = new Thickness(0, 5, 0, 0); content.Children.Add(label); button.Content = content;
@@ -553,7 +603,7 @@ public sealed class ControlCenterWindow : Window
         var options = InstalledNameFonts.Value.ToList();
         if (!options.Any(option => option.Value.Equals(settings.NameFontFamily, StringComparison.OrdinalIgnoreCase)))
             options.Add(new Choice(settings.NameFontFamily, settings.NameFontFamily + "（未安装）"));
-        var row = SettingRow(parent, "字体", "从本机已安装字体中选择");
+        var row = SettingRow(parent, "字体", "从已安装字体中选择");
         var combo = new ComboBox
         {
             ItemsSource = options, DisplayMemberPath = nameof(Choice.Label), SelectedValuePath = nameof(Choice.Value), SelectedValue = settings.NameFontFamily,
@@ -576,7 +626,7 @@ public sealed class ControlCenterWindow : Window
 
     private void BuildNameFontPreview(StackPanel parent)
     {
-        var card = new Border { CornerRadius = new CornerRadius(16), BorderThickness = new Thickness(.8), Padding = new Thickness(20, 17, 20, 17), Margin = new Thickness(0, 16, 0, 6) };
+        var card = new Border { CornerRadius = new CornerRadius(12, 21, 12, 21), BorderThickness = new Thickness(.8), Padding = new Thickness(18, 16, 18, 16), Margin = new Thickness(0, 13, 0, 9) };
         card.SetResourceReference(Border.BackgroundProperty, "PanelBrush"); card.SetResourceReference(Border.BorderBrushProperty, "GlassHighlightBrush");
         var content = new StackPanel(); content.Children.Add(Text("名称预览", 11, FontWeights.Normal, true));
         var examples = _controller.State.Apps.Where(app => !app.Hidden).Select(app => app.Name).Where(name => !string.IsNullOrWhiteSpace(name)).Distinct().Take(2).ToArray();
@@ -585,7 +635,7 @@ public sealed class ControlCenterWindow : Window
         System.Windows.Automation.AutomationProperties.SetName(_fontPreview, "字体预览");
         content.Children.Add(_fontPreview);
         _fontPreviewInfo = Text("", 10, FontWeights.Normal, true); _fontPreviewInfo.TextWrapping = TextWrapping.Wrap; content.Children.Add(_fontPreviewInfo);
-        card.Child = content; parent.Children.Add(card); UpdateNameFontPreview();
+        card.Child = content; SettingsContainer(parent).Children.Add(card); UpdateNameFontPreview();
     }
 
     private void UpdateNameFontPreview()
@@ -629,15 +679,26 @@ public sealed class ControlCenterWindow : Window
 
     private StackPanel Section(StackPanel parent, string title, string subtitle)
     {
-        var heading = new StackPanel { Margin = new Thickness(0, parent.Children.Count == 0 ? 0 : 28, 0, 10) };
-        heading.Children.Add(Text(title, 16, FontWeights.SemiBold));
-        if (!string.IsNullOrEmpty(subtitle)) { var hint = Text(subtitle, 11, FontWeights.Normal, true); hint.Margin = new Thickness(0, 5, 0, 0); heading.Children.Add(hint); }
-        parent.Children.Add(heading); return heading;
+        var group = new StackPanel();
+        var card = new Border { CornerRadius = new CornerRadius(15, 25, 15, 25), Padding = new Thickness(20, 17, 20, 7), BorderThickness = new Thickness(.65), Margin = new Thickness(0, 0, 8, 14), Child = group };
+        card.SetResourceReference(Border.BackgroundProperty, "CardBrush"); card.SetResourceReference(Border.BorderBrushProperty, "GlassHighlightBrush");
+        parent.Children.Add(card); _settingsGroup = group;
+        var heading = new StackPanel { Margin = new Thickness(0, 0, 0, 5) };
+        var titleRow = new Grid(); titleRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(37) }); titleRow.ColumnDefinitions.Add(new ColumnDefinition());
+        var glyph = title switch { "材质与颜色" => "\uE790", "Dock" => "\uE739", "名称字体" => "\uE8D2", "应用整理" => "\uE71D", "性能与启动" => "\uE7E8", _ => "\uE8A5" };
+        var mark = Glyph(glyph, 13); mark.HorizontalAlignment = HorizontalAlignment.Center; mark.SetResourceReference(TextBlock.ForegroundProperty, "AccentBrush");
+        var badge = new Border { Width = 27, Height = 27, CornerRadius = new CornerRadius(7, 11, 7, 11), HorizontalAlignment = HorizontalAlignment.Left, Child = mark };
+        badge.SetResourceReference(Border.BackgroundProperty, "AccentSoftBrush"); titleRow.Children.Add(badge);
+        var name = Text(title, 15, FontWeights.SemiBold); name.VerticalAlignment = VerticalAlignment.Center; Grid.SetColumn(name, 1); titleRow.Children.Add(name); heading.Children.Add(titleRow);
+        if (!string.IsNullOrEmpty(subtitle)) { var hint = Text(subtitle, 10.5, FontWeights.Normal, true); hint.TextWrapping = TextWrapping.Wrap; hint.Margin = new Thickness(37, 6, 0, 3); heading.Children.Add(hint); }
+        group.Children.Add(heading); return heading;
     }
+
+    private StackPanel SettingsContainer(StackPanel parent) => ReferenceEquals(parent, _settingsRoot) ? _settingsGroup ?? parent : parent;
 
     private Grid SettingRow(StackPanel parent, string title, string subtitle)
     {
-        var border = new Border { BorderThickness = new Thickness(0, 0, 0, .5), Padding = new Thickness(0, 15, 2, 15) }; border.SetResourceReference(Border.BorderBrushProperty, "BorderBrush"); parent.Children.Add(border);
+        var border = new Border { BorderThickness = new Thickness(0, 0, 0, .5), Padding = new Thickness(0, 14, 0, 14) }; border.SetResourceReference(Border.BorderBrushProperty, "BorderBrush"); SettingsContainer(parent).Children.Add(border);
         var row = new Grid(); row.ColumnDefinitions.Add(new ColumnDefinition()); row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(224) }); border.Child = row;
         var label = new StackPanel { VerticalAlignment = VerticalAlignment.Center }; label.Children.Add(Text(title, 13));
         if (!string.IsNullOrEmpty(subtitle)) { var sub = Text(subtitle, 10, FontWeights.Normal, true); sub.TextWrapping = TextWrapping.Wrap; sub.Margin = new Thickness(0, 5, 18, 0); label.Children.Add(sub); }
@@ -680,9 +741,15 @@ public sealed class ControlCenterWindow : Window
         var panel = new StackPanel { HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, -30, 0, 0) }; Grid.SetRow(panel, 2); _body.Children.Add(panel);
         var icon = new Image { Source = Icon, Width = 86, Height = 86, Margin = new Thickness(0, 0, 0, 22) }; RenderOptions.SetBitmapScalingMode(icon, BitmapScalingMode.HighQuality); panel.Children.Add(icon);
         var name = Text("LumaDock", 32, FontWeights.SemiBold); name.HorizontalAlignment = HorizontalAlignment.Center; panel.Children.Add(name);
-        var version = Text(typeof(AppController).Assembly.GetName().Version?.ToString(3) ?? "0.5.0", 13, FontWeights.Normal, true); version.Margin = new Thickness(0, 9, 0, 28); version.HorizontalAlignment = HorizontalAlignment.Center; panel.Children.Add(version);
+        var description = Text("桌面 Dock 与应用管理", 13, FontWeights.Normal, true); description.HorizontalAlignment = HorizontalAlignment.Center; description.Margin = new Thickness(0, 9, 0, 15); panel.Children.Add(description);
+        var version = Text("v" + (typeof(AppController).Assembly.GetName().Version?.ToString(3) ?? "0.6.0"), 11, FontWeights.Medium); version.HorizontalAlignment = HorizontalAlignment.Center;
+        var versionBadge = new Border { Child = version, HorizontalAlignment = HorizontalAlignment.Center, Padding = new Thickness(13, 6, 13, 6), CornerRadius = new CornerRadius(7, 13, 7, 13), Margin = new Thickness(0, 0, 0, 23) };
+        versionBadge.SetResourceReference(Border.BackgroundProperty, "AccentSoftBrush"); panel.Children.Add(versionBadge);
         var license = Text("MIT 许可证", 12, FontWeights.Normal, true); license.HorizontalAlignment = HorizontalAlignment.Center; panel.Children.Add(license);
         var credits = Text("应用名称及图标归各自所有者所有。", 11, FontWeights.Normal, true); credits.Margin = new Thickness(0, 8, 0, 0); credits.HorizontalAlignment = HorizontalAlignment.Center; panel.Children.Add(credits);
+        var links = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 23, 0, 0) };
+        links.Children.Add(ActionButton("使用指南", () => Process.Start(new ProcessStartInfo("https://github.com/FouHe0720/LumaDock/blob/main/docs/USER-GUIDE.md") { UseShellExecute = true })));
+        links.Children.Add(ActionButton("GitHub", () => Process.Start(new ProcessStartInfo("https://github.com/FouHe0720/LumaDock") { UseShellExecute = true }))); panel.Children.Add(links);
     }
 
     private TextBlock Text(string text, double size = 13, FontWeight? weight = null, bool muted = false)
@@ -696,12 +763,15 @@ public sealed class ControlCenterWindow : Window
         var button = new Button { Content = label, Padding = new Thickness(15, 9, 15, 9), Margin = new Thickness(0, 0, 7, 0), BorderThickness = new Thickness(0), Cursor = Cursors.Hand, FontSize = 12, VerticalAlignment = VerticalAlignment.Center, HorizontalContentAlignment = HorizontalAlignment.Center };
         button.SetResourceReference(BackgroundProperty, accent ? "AccentBrush" : "PanelBrush");
         if (accent) button.Foreground = Theme.IsDark ? new SolidColorBrush(Color.FromRgb(23, 36, 49)) : Brushes.White; else button.SetResourceReference(ForegroundProperty, "TextBrush");
-        ApplyButtonTemplate(button, 12, accent: accent); button.Click += (_, _) => Safe(action); return button;
+        ApplyButtonTemplate(button, new CornerRadius(9, 16, 9, 16), accent: accent); button.Click += (_, _) => Safe(action); return button;
     }
 
     private static void ApplyButtonTemplate(Button button, double radius, bool tile = false, bool accent = false)
+        => ApplyButtonTemplate(button, new CornerRadius(radius), tile, accent);
+
+    private static void ApplyButtonTemplate(Button button, CornerRadius radius, bool tile = false, bool accent = false)
     {
-        var border = new FrameworkElementFactory(typeof(Border), "Surface"); border.SetValue(Border.CornerRadiusProperty, new CornerRadius(radius)); border.SetBinding(Border.BackgroundProperty, new Binding(nameof(Button.Background)) { RelativeSource = RelativeSource.TemplatedParent }); border.SetBinding(Border.PaddingProperty, new Binding(nameof(Button.Padding)) { RelativeSource = RelativeSource.TemplatedParent });
+        var border = new FrameworkElementFactory(typeof(Border), "Surface"); border.SetValue(Border.CornerRadiusProperty, radius); border.SetBinding(Border.BackgroundProperty, new Binding(nameof(Button.Background)) { RelativeSource = RelativeSource.TemplatedParent }); border.SetBinding(Border.PaddingProperty, new Binding(nameof(Button.Padding)) { RelativeSource = RelativeSource.TemplatedParent });
         border.SetValue(Border.BorderThicknessProperty, new Thickness(.8));
         if (tile) button.BorderBrush = Brushes.Transparent; else button.SetResourceReference(Control.BorderBrushProperty, "GlassHighlightBrush");
         border.SetBinding(Border.BorderBrushProperty, new Binding(nameof(Button.BorderBrush)) { RelativeSource = RelativeSource.TemplatedParent });

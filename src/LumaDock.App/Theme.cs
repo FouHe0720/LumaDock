@@ -26,6 +26,9 @@ internal static class Theme
         Brush("SidebarBrush", light ? "#35FFFFFF" : "#16080F1C");
         Brush("TextBrush", light ? "#202C3B" : "#F0F5FC");
         Brush("MutedBrush", light ? "#526274" : "#B6C4D4");
+        Brush("CaptionBrush", light ? "#64748A" : "#A7B8CB");
+        Brush("CardBrush", light ? "#36FFFFFF" : "#10071221");
+        Brush("ToggleTrackBrush", light ? "#665B7482" : "#47FFFFFF");
         Brush("BorderBrush", light ? "#A6FFFFFF" : "#38FFFFFF");
         var accentHex = (accent, light) switch
         {

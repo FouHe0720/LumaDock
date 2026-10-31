@@ -70,6 +70,19 @@ internal static class Program
                     }
                 });
 
+                var sampleName = controller.State.Apps.First(app => !app.Hidden).Name;
+                var query = sampleName[..Math.Min(2, sampleName.Length)];
+                var search = Descendants<TextBox>(window).Single(box => System.Windows.Automation.AutomationProperties.GetName(box) == "搜索应用");
+                search.Text = query; await Frame();
+                Test("Category counts follow the actual visible search results", () =>
+                {
+                    var expected = controller.State.Apps.Count(app => !app.Hidden && (app.Name.Contains(query, StringComparison.CurrentCultureIgnoreCase) || app.LaunchPath.Contains(query, StringComparison.OrdinalIgnoreCase)));
+                    var all = Descendants<Button>(window).Single(button => Equals(button.Tag, "全部应用"));
+                    Require(System.Windows.Automation.AutomationProperties.GetHelpText(all) == $"{expected} 个应用", "Category count does not match the actual search results.");
+                    Require(Descendants<TextBlock>(all).Any(text => text.Text == expected.ToString()), "The visible count did not update.");
+                });
+                search.Clear(); await Frame();
+
                 controller.State.Settings.FollowSystemIconFont = false;
                 controller.State.Settings.NameFontSize = 28;
                 controller.State.Settings.NameFontBold = true;

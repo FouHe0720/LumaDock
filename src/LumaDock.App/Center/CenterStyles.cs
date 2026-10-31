@@ -21,7 +21,7 @@ internal static class CenterStyles
               </Track.DecreaseRepeatButton>
               <Track.Thumb>
                 <Thumb x:Name="Thumb" Width="15" Height="15" Focusable="False" Cursor="Hand">
-                  <Thumb.Template><ControlTemplate TargetType="Thumb"><Ellipse x:Name="Handle" Fill="{DynamicResource TextBrush}" Stroke="{DynamicResource PanelBrush}" StrokeThickness="2"/><ControlTemplate.Triggers><Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Handle" Property="Fill" Value="{DynamicResource AccentBrush}"/></Trigger><Trigger Property="IsDragging" Value="True"><Setter TargetName="Handle" Property="Fill" Value="{DynamicResource AccentBrush}"/></Trigger></ControlTemplate.Triggers></ControlTemplate></Thumb.Template>
+                  <Thumb.Template><ControlTemplate TargetType="Thumb"><Border x:Name="Handle" CornerRadius="5,8,5,8" Background="{DynamicResource TextBrush}" BorderBrush="{DynamicResource GlassHighlightBrush}" BorderThickness="1"/><ControlTemplate.Triggers><Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Handle" Property="Background" Value="{DynamicResource AccentBrush}"/></Trigger><Trigger Property="IsDragging" Value="True"><Setter TargetName="Handle" Property="Background" Value="{DynamicResource AccentBrush}"/></Trigger></ControlTemplate.Triggers></ControlTemplate></Thumb.Template>
                 </Thumb>
               </Track.Thumb>
               <Track.IncreaseRepeatButton>
@@ -41,8 +41,8 @@ internal static class CenterStyles
     internal static readonly ControlTemplate ToggleTemplate = (ControlTemplate)XamlReader.Parse("""
         <ControlTemplate xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" TargetType="CheckBox">
           <Grid Width="44" Height="26" Background="Transparent" Cursor="Hand">
-            <Border x:Name="Track" CornerRadius="13" Background="{DynamicResource BorderBrush}"/>
-            <Ellipse x:Name="Knob" Width="20" Height="20" Margin="3" Fill="White" HorizontalAlignment="Left"/>
+            <Border x:Name="Track" CornerRadius="8,13,13,8" Background="{DynamicResource ToggleTrackBrush}"/>
+            <Border x:Name="Knob" Width="20" Height="20" Margin="3" CornerRadius="6,10,10,6" Background="White" HorizontalAlignment="Left"/>
           </Grid>
           <ControlTemplate.Triggers>
             <Trigger Property="IsChecked" Value="True">
@@ -86,7 +86,7 @@ internal static class CenterStyles
                 <Grid>
                   <ToggleButton Focusable="False" IsChecked="{Binding IsDropDownOpen, Mode=TwoWay, RelativeSource={RelativeSource TemplatedParent}}" ClickMode="Press" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1">
                     <ToggleButton.Template>
-                      <ControlTemplate TargetType="ToggleButton"><Border x:Name="Button" Background="{TemplateBinding Background}" CornerRadius="8" BorderThickness="1" BorderBrush="{TemplateBinding BorderBrush}"><Grid><TextBlock Text="⌄" Foreground="{DynamicResource MutedBrush}" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,12,3"/></Grid></Border><ControlTemplate.Triggers><Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Button" Property="Opacity" Value="0.75"/></Trigger></ControlTemplate.Triggers></ControlTemplate>
+                      <ControlTemplate TargetType="ToggleButton"><Border x:Name="Button" Background="{TemplateBinding Background}" CornerRadius="9,14,9,14" BorderThickness="0.8" BorderBrush="{TemplateBinding BorderBrush}"><Grid><TextBlock Text="⌄" Foreground="{DynamicResource MutedBrush}" HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,12,3"/></Grid></Border><ControlTemplate.Triggers><Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Button" Property="Opacity" Value="0.75"/></Trigger></ControlTemplate.Triggers></ControlTemplate>
                     </ToggleButton.Template>
                   </ToggleButton>
                   <ContentPresenter Margin="12,8,30,8" IsHitTestVisible="False" VerticalAlignment="Center" Content="{TemplateBinding SelectionBoxItem}" ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}" ContentTemplateSelector="{TemplateBinding ItemTemplateSelector}"/>
