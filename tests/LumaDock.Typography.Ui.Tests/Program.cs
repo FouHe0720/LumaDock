@@ -198,7 +198,7 @@ internal static class Program
                     testCount = Tests.Count, tests = Tests, snapshots = Snapshots, errors = Errors,
                     systemSettingsChanged = false, systemFontChanged = false, appLaunches = 0,
                     controllerStartCalled = false, nativeWindowsDisabledForFocusSafety = true,
-                    interpretation = "Reads the current Windows desktop font and verifies actual WPF application labels and layout. Manual sizes change only an isolated LumaDock profile. This does not exercise the external changesize Apply button or prove font-change broadcast compatibility."
+                    interpretation = "Checks actual WPF labels, local font preferences, category counts and bounded interactive motion using isolated application data. Windows global typography is not modified."
                 };
                 Directory.CreateDirectory(Path.GetDirectoryName(reportPath)!);
                 File.WriteAllText(reportPath, JsonSerializer.Serialize(report, new JsonSerializerOptions { WriteIndented = true }));
