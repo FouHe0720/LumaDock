@@ -100,12 +100,13 @@ public sealed class DockWindow : Window
         var optical = s.LiquidGlass && !s.PowerSaver && !SystemParameters.HighContrast;
         var baseColor = ((SolidColorBrush)FindResource("OpaqueSurfaceBrush")).Color;
         var opacity = Math.Clamp((controller.State.Settings.Opacity - .55) / .45, 0, 1);
+        var realtime = optical && s.LiveGlass;
         // Opaque underlay is always present while the first asynchronous sample
         // is loading. The sampled frame itself supplies translucency and optics.
-        baseColor.A = 255;
+        baseColor.A = realtime ? (byte)(92 + 118 * opacity) : (byte)255;
         if (SystemParameters.HighContrast) baseColor = SystemColors.WindowColor;
         plate.Fill = new SolidColorBrush(baseColor);
-        tint.Background = optical ? new SolidColorBrush(Color.FromArgb((byte)(5 + 72 * opacity * opacity * opacity), baseColor.R, baseColor.G, baseColor.B)) : Brushes.Transparent;
+        tint.Background = optical && !realtime ? new SolidColorBrush(Color.FromArgb((byte)(5 + 72 * opacity * opacity * opacity), baseColor.R, baseColor.G, baseColor.B)) : Brushes.Transparent;
         highlight.AccentColor = Theme.AccentColor;
         highlight.MotionStrength = controller.State.Settings.GlassFlowStrength;
         highlight.MotionEnabled = controller.State.Settings.GlassMotion && controller.State.Settings.LiquidGlass && !controller.ReducedMotion;
@@ -151,6 +152,8 @@ public sealed class DockWindow : Window
                 button.ContextMenu = new ContextMenu();
                 button.ContextMenu.Closed += (_, _) => ScheduleHide();
                 AddMenu(button.ContextMenu, "打开 / 切换到应用", () => controller.Launch(app));
+                AddMenu(button.ContextMenu, "更换图标…", () => controller.ChooseIcon(app, this));
+                if (!string.IsNullOrEmpty(app.CustomIconPath)) AddMenu(button.ContextMenu, "恢复原图标", () => controller.SetCustomIcon(app, ""));
                 AddMenu(button.ContextMenu, "从 Dock 移除", () => controller.Unpin(app));
                 _ = LoadIcon(image, app, version);
             }

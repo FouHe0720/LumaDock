@@ -3,7 +3,6 @@ using System.Windows;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Interop;
-using System.Windows.Input;
 using System.Windows.Threading;
 using LumaDock.Core;
 using LumaDock.Storage;
@@ -11,14 +10,13 @@ using LumaDock.Windows;
 
 namespace LumaDock.App;
 
-/// <summary>Local backdrop optics; idle Dock and inactive windows have no capture loop.</summary>
+/// <summary>Optional still optics. Live backgrounds belong to the desktop compositor, never a sampled frame loop.</summary>
 internal sealed class LiquidGlassSurface : FrameworkElement, IDisposable
 {
     private readonly Window host;
     private readonly AppController controller;
-    private readonly WallpaperService wallpaper = new();
+    private WallpaperService? wallpaper;
     private readonly DispatcherTimer throttle;
-    private readonly DispatcherTimer live;
     private CancellationTokenSource? pending;
     private BitmapSource? frame;
     private bool disposed, attached;
@@ -30,7 +28,6 @@ internal sealed class LiquidGlassSurface : FrameworkElement, IDisposable
     private sealed record SceneStamp(ulong Hash, int SourceWidth, int SourceHeight, int Width, int Height,
         double OffsetX, double OffsetY, double PlacementWidth, double PlacementHeight, uint Background, double Radius, double Clarity, bool Dark);
     private SceneStamp? lastScene;
-    private readonly BackdropRefreshCadence cadence = new();
     /// <summary>Optional material radius in DIPs, for the Dock's independent silhouette.</summary>
     public double? CornerRadiusOverride { get; set; }
     public double LastRenderMilliseconds { get; private set; }
@@ -42,8 +39,6 @@ internal sealed class LiquidGlassSurface : FrameworkElement, IDisposable
         IsHitTestVisible = false;
         throttle = new DispatcherTimer(DispatcherPriority.Background) { Interval = TimeSpan.FromMilliseconds(80) };
         throttle.Tick += RenderTick;
-        live = new DispatcherTimer(DispatcherPriority.Background) { Interval = TimeSpan.FromMilliseconds(120) };
-        live.Tick += LiveTick;
         Loaded += OnLoaded;
         Unloaded += OnUnloaded;
         IsVisibleChanged += (_, _) => { if (IsVisible) Refresh(); else ReleaseFrame(); };
@@ -57,9 +52,7 @@ internal sealed class LiquidGlassSurface : FrameworkElement, IDisposable
         host.LocationChanged += GeometryChanged;
         host.SizeChanged += SizeChangedOnHost;
         host.Activated += Activated;
-        host.Deactivated += ActivityChanged;
-        host.MouseEnter += MouseActivity; host.MouseLeave += MouseActivity;
-        wallpaper.Changed += WallpaperChanged;
+        if (wallpaper != null) wallpaper.Changed += WallpaperChanged;
         Refresh();
     }
     private void OnUnloaded(object sender, RoutedEventArgs e)
@@ -67,32 +60,16 @@ internal sealed class LiquidGlassSurface : FrameworkElement, IDisposable
         if (attached)
         {
             host.LocationChanged -= GeometryChanged; host.SizeChanged -= SizeChangedOnHost;
-            host.Activated -= Activated; wallpaper.Changed -= WallpaperChanged;
-            host.Deactivated -= ActivityChanged;
-            host.MouseEnter -= MouseActivity; host.MouseLeave -= MouseActivity;
+            host.Activated -= Activated;
+            if (wallpaper != null) wallpaper.Changed -= WallpaperChanged;
             attached = false;
         }
         ReleaseFrame();
     }
-    private void GeometryChanged(object? sender, EventArgs e) { cadence.Reset(); Refresh(); }
-    private void SizeChangedOnHost(object sender, SizeChangedEventArgs e) { cadence.Reset(); Refresh(); }
-    private void Activated(object? sender, EventArgs e) { cadence.Reset(); wallpaper.Refresh(); Refresh(); }
-    private void ActivityChanged(object? sender, EventArgs e) => UpdateActivity();
-    private void MouseActivity(object sender, MouseEventArgs e) { cadence.Reset(); UpdateActivity(); }
-    private void LiveTick(object? sender, EventArgs e) { if (pending == null) Refresh(); }
-    private void UpdateActivity()
-    {
-        var active = host is DockWindow ? host.IsMouseOver : host.IsActive;
-        var enabled = IsVisible && active && SourceKind == "Captured backdrop" && controller.State.Settings.LiveGlass && controller.State.Settings.LiquidGlass && !controller.ReducedMotion && !SystemParameters.HighContrast;
-        if (enabled)
-        {
-            var interval = TimeSpan.FromMilliseconds(cadence.DelayMilliseconds);
-            if (live.Interval != interval) live.Interval = interval;
-            if (!live.IsEnabled) live.Start();
-        }
-        else live.Stop();
-    }
-    private void WallpaperChanged(object? sender, EventArgs e) { cadence.Reset(); Refresh(); }
+    private void GeometryChanged(object? sender, EventArgs e) => Refresh();
+    private void SizeChangedOnHost(object sender, SizeChangedEventArgs e) => Refresh();
+    private void Activated(object? sender, EventArgs e) { wallpaper?.Refresh(); Refresh(); }
+    private void WallpaperChanged(object? sender, EventArgs e) => Refresh();
     private void HostClosed(object? sender, EventArgs e) => Dispose();
 
     public void Refresh()
@@ -102,29 +79,50 @@ internal sealed class LiquidGlassSurface : FrameworkElement, IDisposable
         // Dock opacity is applied by the plate overlay, never by fading this frame
         // over an opaque underlay (which would invert the transparency control).
         Opacity = 1;
-        UpdateActivity();
+        if (controller.State.Settings.LiveGlass)
+        {
+            ReleaseFrame();
+            if (wallpaper != null) { wallpaper.Changed -= WallpaperChanged; wallpaper.Dispose(); wallpaper = null; }
+            var kind = host is DockWindow ? controller.State.Settings.LiquidGlass && !controller.State.Settings.PowerSaver && !SystemParameters.HighContrast ? "Live transparency" : "Solid fallback"
+                : WindowBackdrop.GetStatus(host) is { } status && (status.ClearActive || status.AcrylicActive) ? "Native compositor" : "System fallback";
+            if (SourceKind != kind)
+            {
+                SourceKind = kind;
+                controller.RecordGlassCompositor(host is DockWindow ? "dock" : "center", kind);
+            }
+            return;
+        }
         if (!IsVisible || ActualWidth < 10 || ActualHeight < 10 || controller.State.Settings.PowerSaver || SystemParameters.HighContrast || !controller.State.Settings.LiquidGlass)
         { ReleaseFrame(); return; }
+        if (wallpaper == null)
+        {
+            wallpaper = new WallpaperService();
+            if (attached) wallpaper.Changed += WallpaperChanged;
+        }
         if (!throttle.IsEnabled) throttle.Start();
     }
     private void ReleaseFrame()
     {
-        throttle.Stop(); live.Stop(); generation++;
-        pending?.Cancel(); frame = null; lastScene = null; cadence.Reset(); InvalidateVisual();
+        throttle.Stop(); generation++;
+        pending?.Cancel(); pending = null;
+        if (frame != null) { frame = null; InvalidateVisual(); }
+        lastScene = null;
     }
     private async void RenderTick(object? sender, EventArgs e)
     {
         throttle.Stop();
-        if (disposed || !IsVisible || ActualWidth < 10 || ActualHeight < 10 || !controller.State.Settings.LiquidGlass || controller.State.Settings.PowerSaver || SystemParameters.HighContrast) return;
-        var snapshot = wallpaper.Current;
+        if (disposed || !IsVisible || ActualWidth < 10 || ActualHeight < 10 || controller.State.Settings.LiveGlass || !controller.State.Settings.LiquidGlass || controller.State.Settings.PowerSaver || SystemParameters.HighContrast) return;
+        var snapshot = wallpaper?.Current;
+        if (snapshot == null) return;
         var dpi = VisualTreeHelper.GetDpi(this);
         var origin = PointToScreen(new Point());
         var physicalWidth = ActualWidth * dpi.DpiScaleX;
         var physicalHeight = ActualHeight * dpi.DpiScaleY;
         var monitor = snapshot.Monitors.OrderByDescending(m => Intersection(origin.X, origin.Y, physicalWidth, physicalHeight, m)).FirstOrDefault();
         var thisGeneration = ++generation;
-        pending?.Cancel(); pending?.Dispose(); pending = new CancellationTokenSource();
-        var token = pending.Token;
+        pending?.Cancel();
+        var operation = new CancellationTokenSource(); pending = operation;
+        var token = operation.Token;
         var dark = Theme.IsDark;
         var clarity = controller.State.Settings.GlassClarity;
         var radius = (CornerRadiusOverride ?? controller.State.Settings.CornerRadius) * dpi.DpiScaleX;
@@ -147,7 +145,7 @@ internal sealed class LiquidGlassSurface : FrameworkElement, IDisposable
                 {
                     source = new LensSource(captured.Width, captured.Height, captured.Pixels);
                     placement = new WallpaperPlacement(captured.Left, captured.Top, captured.Width, captured.Height, false, 0, 0, 0);
-                    kind = "Captured backdrop";
+                    kind = "Captured snapshot";
                 }
                 else if (monitor is { ImageAvailable: true })
                 {
@@ -164,8 +162,8 @@ internal sealed class LiquidGlassSurface : FrameworkElement, IDisposable
                 return (Pixels: (byte[]?)pixels, Kind: kind, Stamp: (SceneStamp?)stamp);
             }, token);
             if (disposed || token.IsCancellationRequested || thisGeneration != generation) return;
-            cadence.Observe(bitmap.Pixels != null);
             LastRenderMilliseconds = watch.Elapsed.TotalMilliseconds;
+            SourceKind = bitmap.Kind;
             if (bitmap.Pixels != null)
             {
                 // Keep one GPU resource for a stable surface size. Changing the
@@ -178,12 +176,15 @@ internal sealed class LiquidGlassSurface : FrameworkElement, IDisposable
                 lastScene = bitmap.Stamp;
                 if (replace) InvalidateVisual();
             }
-            UpdateActivity();
+            else if (bitmap.Stamp == null && frame != null)
+            {
+                frame = null; lastScene = null; InvalidateVisual();
+            }
             controller.RecordGlassFrame(host is DockWindow ? "dock" : "center", SourceKind, LastRenderMilliseconds);
         }
         catch (OperationCanceledException) { }
         catch (Exception ex) { if (!loggedFailure) { Log.Write("Wallpaper glass unavailable; using system backdrop", ex); loggedFailure = true; } }
-        finally { if (thisGeneration == generation) { pending?.Dispose(); pending = null; } }
+        finally { if (ReferenceEquals(pending, operation)) pending = null; operation.Dispose(); }
     }
 
     protected override void OnRender(DrawingContext dc)
@@ -253,8 +254,7 @@ internal sealed class LiquidGlassSurface : FrameworkElement, IDisposable
     {
         if (disposed) return;
         disposed = true; OnUnloaded(this, new RoutedEventArgs());
-        host.Closed -= HostClosed; wallpaper.Dispose();
+        host.Closed -= HostClosed; wallpaper?.Dispose(); wallpaper = null;
         throttle.Tick -= RenderTick; pending?.Dispose(); pending = null;
-        live.Tick -= LiveTick;
     }
 }

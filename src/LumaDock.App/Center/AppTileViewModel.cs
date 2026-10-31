@@ -14,9 +14,9 @@ public sealed class AppTileViewModel(AppEntry entry) : INotifyPropertyChanged
     public BitmapSource? Icon { get => _icon; private set { _icon = value; Changed(); } }
     public event PropertyChangedEventHandler? PropertyChanged;
     private void Changed([CallerMemberName] string? name = null) => PropertyChanged?.Invoke(this, new(name));
-    public async Task LoadIconAsync(AppController controller)
+    public async Task LoadIconAsync(AppController controller, int physicalPixels = 80)
     {
-        try { Icon = await controller.GetIconAsync(Entry); }
+        try { Icon = await controller.GetIconAsync(Entry, physicalPixels); }
         catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"Icon unavailable: {Entry.Name}: {ex.Message}"); }
     }
 }

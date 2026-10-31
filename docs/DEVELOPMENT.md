@@ -58,7 +58,9 @@ WSL 可用于编辑文件，但 Linux 构建结果不能代替 Windows WPF 编�
 | `scripts/test.ps1` | Core / Storage 契约与损坏恢复 | .NET SDK |
 | `scripts/test-lens.ps1` | 像素折射、柔化、边界和取消 | .NET SDK |
 | `scripts/test-layout.ps1` | 大字、自适应网格和边界输入 | .NET SDK |
-| `scripts/test-cadence.ps1` | 背景采样退避、变化恢复与重置 | .NET SDK |
+| `scripts/test-cadence.ps1` | 旧版采样节奏组件回归；实时模式不使用此策略 | .NET SDK |
+| `scripts/test-icon.ps1` | 真实图标、透明通道、自定义来源、缓存更新与回退 | Windows WPF / Shell |
+| `scripts/test-compositor-ui.ps1` | 实时合成、静态切换、已知背景变化与资源停止 | Windows 交互会话 |
 | `scripts/test-windows.ps1` | Shell、真实图标、显示器和窗口身份 | Windows 交互会话 |
 | `scripts/test-font.ps1` | 系统图标字体读取与释放 | Windows |
 | `scripts/test-typography-ui.ps1` | 实际 WPF 字体、预览、导航与流光停止 | Windows 交互会话 |

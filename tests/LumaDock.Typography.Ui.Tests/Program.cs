@@ -7,6 +7,7 @@ using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Interop;
 using System.Windows.Media;
+using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using LumaDock.App;
 using LumaDock.App.Center;
@@ -82,6 +83,49 @@ internal static class Program
                     Require(Descendants<TextBlock>(all).Any(text => text.Text == expected.ToString()), "The visible count did not update.");
                 });
                 search.Clear(); await Frame();
+
+                // Use the visible tile and its real controller/menu/binding data
+                // flow. Only the isolated profile and a synthetic PNG are written.
+                var iconTarget = Descendants<Button>(window).Where(button => button.IsVisible && button.DataContext is AppTileViewModel)
+                    .Select(button => ((AppTileViewModel)button.DataContext).Entry).First();
+                var customIconFile = Path.Combine(dataPath, "local-icon-fixture.png");
+                var iconPixels = new byte[96 * 48 * 4];
+                for (var offset = 0; offset < iconPixels.Length; offset += 4)
+                { iconPixels[offset] = 117; iconPixels[offset + 1] = 33; iconPixels[offset + 2] = 241; iconPixels[offset + 3] = 255; }
+                var iconEncoder = new PngBitmapEncoder();
+                iconEncoder.Frames.Add(BitmapFrame.Create(BitmapSource.Create(96, 48, 96, 96, PixelFormats.Bgra32, null, iconPixels, 96 * 4)));
+                using (var output = File.Create(customIconFile)) iconEncoder.Save(output);
+                var fixtureHashBefore = FileHash(customIconFile);
+                var originalPath = iconTarget.LaunchPath;
+                var originalFileHash = File.Exists(originalPath) ? FileHash(originalPath) : null;
+                var originalIconTile = await WaitForIcon(window, iconTarget.Id, image => image != null);
+                var originalIcon = ((AppTileViewModel)originalIconTile.DataContext).Icon!;
+                await TestAsync("A custom icon reaches the visible tile binding and isolated persisted record", async () =>
+                {
+                    Require(originalIconTile.ContextMenu!.Items.OfType<MenuItem>().Any(item => Equals(item.Header, "更换图标…")), "The visible application's change-icon action is missing.");
+                    controller.SetCustomIcon(iconTarget, customIconFile);
+                    var tile = await WaitForIcon(window, iconTarget.Id, image => image != null && image.PixelWidth <= 96 && image.PixelWidth == image.PixelHeight * 2 && IconBytes(image)[2] == 241);
+                    var vm = (AppTileViewModel)tile.DataContext;
+                    var boundImage = Descendants<Image>(tile).Single();
+                    Require(ReferenceEquals(boundImage.Source, vm.Icon), "The actual WPF image binding did not receive the new icon.");
+                    Require(vm.Entry.CustomIconPath == customIconFile && new StateStore(dataPath).Load().Apps.Single(app => app.Id == iconTarget.Id).CustomIconPath == customIconFile, "The custom icon path did not persist.");
+                    Require(tile.ContextMenu!.Items.OfType<MenuItem>().Single(item => Equals(item.Header, "恢复原图标")).IsEnabled, "The restore-icon action did not become available.");
+                    Require(iconTarget.LaunchPath == originalPath, "Changing an icon changed the launch target.");
+                });
+                await TestAsync("The actual restore-icon menu action restores artwork and leaves source files unchanged", async () =>
+                {
+                    var tile = Descendants<Button>(window).Single(button => button.DataContext is AppTileViewModel vm && vm.Entry.Id == iconTarget.Id);
+                    var restore = tile.ContextMenu!.Items.OfType<MenuItem>().Single(item => Equals(item.Header, "恢复原图标"));
+                    Require(restore.IsEnabled, "Restore is unavailable after setting the fixture icon.");
+                    restore.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+                    tile = await WaitForIcon(window, iconTarget.Id, image => image != null && IconBytes(image).SequenceEqual(IconBytes(originalIcon)));
+                    var vm = (AppTileViewModel)tile.DataContext;
+                    Require(vm.Entry.CustomIconPath.Length == 0 && new StateStore(dataPath).Load().Apps.Single(app => app.Id == iconTarget.Id).CustomIconPath.Length == 0, "Restoring the original icon did not clear the saved override.");
+                    Require(ReferenceEquals(Descendants<Image>(tile).Single().Source, vm.Icon), "Restored artwork did not reach the actual image binding.");
+                    Require(!tile.ContextMenu!.Items.OfType<MenuItem>().Single(item => Equals(item.Header, "恢复原图标")).IsEnabled, "Restore stayed enabled without an override.");
+                    Require(FileHash(customIconFile).SequenceEqual(fixtureHashBefore), "The custom icon source was modified.");
+                    Require(originalFileHash == null || FileHash(originalPath).SequenceEqual(originalFileHash), "The original application or shortcut was modified.");
+                });
 
                 controller.State.Settings.FollowSystemIconFont = false;
                 controller.State.Settings.NameFontSize = 28;
@@ -325,6 +369,31 @@ internal static class Program
         await Application.Current.Dispatcher.InvokeAsync(() => { }, DispatcherPriority.ApplicationIdle);
         await Task.Delay(50);
         await Application.Current.Dispatcher.InvokeAsync(() => { }, DispatcherPriority.ApplicationIdle);
+    }
+    private static async Task<Button> WaitForIcon(ControlCenterWindow window, string id, Func<BitmapSource?, bool> ready)
+    {
+        for (var attempt = 0; attempt < 60; attempt++)
+        {
+            await Frame();
+            var tile = Descendants<Button>(window).FirstOrDefault(button => button.IsVisible && button.DataContext is AppTileViewModel vm && vm.Entry.Id == id);
+            if (tile?.DataContext is AppTileViewModel model && ready(model.Icon)) return tile;
+        }
+        throw new InvalidOperationException("The visible tile did not receive the expected icon.");
+    }
+    private static byte[] IconBytes(BitmapSource image)
+    {
+        var converted = new FormatConvertedBitmap(image, PixelFormats.Bgra32, null, 0);
+        var pixels = new byte[converted.PixelWidth * converted.PixelHeight * 4];
+        converted.CopyPixels(pixels, converted.PixelWidth * 4, 0); return pixels;
+    }
+    private static byte[] FileHash(string path)
+    {
+        using var stream = File.OpenRead(path); return System.Security.Cryptography.SHA256.HashData(stream);
+    }
+    private static async Task TestAsync(string name, Func<Task> action)
+    {
+        try { await action(); Tests.Add(new(name, true, null)); Console.WriteLine("PASS " + name); }
+        catch (Exception error) { Tests.Add(new(name, false, error.Message)); Console.WriteLine("FAIL " + name + ": " + error.Message); }
     }
     private static void Test(string name, Action action)
     {

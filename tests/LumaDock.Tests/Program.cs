@@ -195,6 +195,27 @@ Test("Unknown or null Dock silhouettes recover without losing organization", () 
     }
 });
 
+Test("Live clear and frosted preferences roundtrip and invalid concentration recovers", () =>
+{
+    var store = Store("live-glass-style"); var state = new AppState { Settings = new() { LiveGlassStyle = "Frosted", BackdropOpacity = .5 } };
+    store.Save(state); var read = store.Load(); Assert(read.Settings.LiveGlassStyle == "Frosted" && read.Settings.BackdropOpacity == .5);
+    read.Settings.LiveGlassStyle = "other"; read.Settings.BackdropOpacity = double.NaN; Catalog.Normalize(read);
+    Assert(read.Settings.LiveGlassStyle == "Clear" && read.Settings.BackdropOpacity == .65);
+});
+Test("A local custom icon roundtrips and survives application discovery", () =>
+{
+    var state = new AppState { Apps = [Entry("icon")] };
+    state.Apps[0].CustomIconPath = @"C:\fixture\brand.ico";
+    var store = Store("custom-icon"); store.Save(state); var read = store.Load();
+    Assert(read.Apps[0].CustomIconPath == @"C:\fixture\brand.ico");
+    Catalog.Merge(read, [Entry("icon")]); Assert(read.Apps[0].CustomIconPath == @"C:\fixture\brand.ico");
+});
+Test("Custom icons reject network, device, URL and relative imports", () =>
+{
+    foreach (var path in new[] { @"\\server\share\icon.ico", @"\\?\C:\icon.ico", "//server/share/icon.png", "https://example.invalid/a.png", "file:///C:/a.ico", "relative.ico", @"C:\fixture\run.cmd" })
+        Assert(Catalog.NormalizeIconPath(path) == "", "Accepted nonlocal or unsupported icon path");
+    Assert(Catalog.NormalizeIconPath(null) == "");
+});
 var reportIndex = Array.IndexOf(args, "--report");
 var report = new { timestamp = DateTimeOffset.Now, os = Environment.OSVersion.ToString(), framework = System.Runtime.InteropServices.RuntimeInformation.FrameworkDescription, passed = results.Count(r => r.Passed), failed = results.Count(r => !r.Passed), cases = results, fixtureDirectory = root };
 var json = JsonSerializer.Serialize(report, new JsonSerializerOptions { WriteIndented = true });

@@ -9,6 +9,7 @@ public sealed class AppEntry
     public string WorkingDirectory { get; set; } = "";
     public string ExecutablePath { get; set; } = "";
     public string AppUserModelId { get; set; } = "";
+    public string CustomIconPath { get; set; } = "";
     public string Category { get; set; } = "其他";
     public string Source { get; set; } = "Manual";
     public List<string> DesktopPaths { get; set; } = [];
@@ -21,6 +22,8 @@ public sealed class DockSettings
     public double Opacity { get; set; } = .88;
     public bool LiquidGlass { get; set; } = true;
     public bool LiveGlass { get; set; } = true;
+    public string LiveGlassStyle { get; set; } = "Clear";
+    public double BackdropOpacity { get; set; } = .65;
     public double GlassClarity { get; set; } = .65;
     public bool GlassMotion { get; set; } = true;
     public double GlassFlowStrength { get; set; } = .45;

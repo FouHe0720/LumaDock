@@ -101,7 +101,8 @@ public sealed class ControlCenterWindow : Window
         SnapsToDevicePixels = true;
         SetResourceReference(ForegroundProperty, "TextBrush");
         Resources[typeof(ComboBox)] = CenterStyles.ComboStyle();
-        WindowBackdrop.Attach(this, () => Theme.IsDark, () => _controller.State.Settings.PowerSaver);
+        WindowBackdrop.Attach(this, () => Theme.IsDark, () => _controller.State.Settings.PowerSaver,
+            () => _controller.State.Settings.LiveGlass && _controller.State.Settings.LiquidGlass && _controller.State.Settings.LiveGlassStyle == "Clear");
         BuildChrome();
         _controller.Changed += ControllerChanged;
         PreviewKeyDown += (_, e) => { if (e.Key == Key.Escape) { HideSmoothly(); e.Handled = true; } };
@@ -114,6 +115,7 @@ public sealed class ControlCenterWindow : Window
         Deactivated += (_, _) => _glassRim.StopMotion();
         Activated += (_, _) => _controller.RefreshSystemFont();
         ContentRendered += (_, _) => _controller.RecordLaunchpadFrame();
+        Loaded += (_, _) => UpdateSurfaceTint();
         Render();
     }
 
@@ -210,6 +212,7 @@ public sealed class ControlCenterWindow : Window
         _settingsRoot = null; _settingsGroup = null;
         _categoryCounts.Clear();
         WindowBackdrop.Refresh(this, Theme.IsDark, _controller.State.Settings.PowerSaver);
+        UpdateSurfaceTint();
         _shell.CornerRadius = new CornerRadius(_controller.State.Settings.CornerRadius);
         _glassRim.Radius = _controller.State.Settings.CornerRadius;
         UpdateGlassMotion();
@@ -434,7 +437,7 @@ public sealed class ControlCenterWindow : Window
             lift.BeginAnimation(TranslateTransform.YProperty, new DoubleAnimation(y, TimeSpan.FromMilliseconds(120)) { EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseOut } });
         }
         tile.MouseEnter += (_, _) => Lift(-2); tile.MouseLeave += (_, _) => Lift(0);
-        tile.Loaded += async (_, _) => await vm.LoadIconAsync(_controller);
+        tile.Loaded += async (_, _) => await vm.LoadIconAsync(_controller, Math.Clamp(Math.Max(80, (int)Math.Ceiling(48 * VisualTreeHelper.GetDpi(image).DpiScaleX / 16) * 16), 32, 256));
         tile.PreviewMouseLeftButtonDown += (_, e) => _dragStart = e.GetPosition(tile);
         tile.PreviewMouseMove += (_, e) =>
         {
@@ -459,6 +462,8 @@ public sealed class ControlCenterWindow : Window
         var groups = new MenuItem { Header = "移到分组" };
         foreach (var category in _controller.State.Categories) { var captured = category; groups.Items.Add(Menu(category, () => { app.Category = captured; _controller.Save(); RenderAppGrid(desktop); })); }
         menu.Items.Add(groups);
+        menu.Items.Add(Menu("更换图标…", () => _controller.ChooseIcon(app, this)));
+        var restoreIcon = Menu("恢复原图标", () => _controller.SetCustomIcon(app, "")); restoreIcon.IsEnabled = !string.IsNullOrEmpty(app.CustomIconPath); menu.Items.Add(restoreIcon);
         if (desktop) menu.Items.Add(Menu("在应用库中查看", () => { _section = "Launchpad"; _category = app.Category; _query = app.Name; Render(); }));
         menu.Items.Add(new Separator()); menu.Items.Add(Menu("删除管理记录…", () =>
         {
@@ -509,11 +514,16 @@ public sealed class ControlCenterWindow : Window
         var settings = _controller.State.Settings;
         var materialHeading = Section(stack, "材质与颜色", "");
         AccentPaletteRow(stack);
-        ToggleRow(stack, "液态玻璃", "折射后方画面；关闭后使用系统磨砂", settings.LiquidGlass, value => settings.LiquidGlass = value);
-        ToggleRow(stack, "动态透景", "窗口正在使用或鼠标停在 Dock 时更新背景", settings.LiveGlass, value => settings.LiveGlass = value);
+        ToggleRow(stack, "液态玻璃", "玻璃边缘与透景材质", settings.LiquidGlass, value => settings.LiquidGlass = value);
+        ToggleRow(stack, "动态透景", "系统实时合成；关闭后使用静态折射", settings.LiveGlass, value => { settings.LiveGlass = value; Dispatcher.BeginInvoke(() => Render()); });
+        if (settings.LiveGlass)
+        {
+            SelectRow(stack, "透景风格", "", new[] { ("Clear", "清透"), ("Frosted", "磨砂") }, settings.LiveGlassStyle, value => { settings.LiveGlassStyle = value; Dispatcher.BeginInvoke(() => Render()); });
+            if (settings.LiveGlassStyle == "Clear") SliderRow(stack, "窗口浓度", .25, .9, settings.BackdropOpacity, value => settings.BackdropOpacity = value, value => $"{value:P0}");
+        }
         ToggleRow(stack, "玻璃流动", "随指针轻轻起伏，停下后逐渐收住", settings.GlassMotion, value => settings.GlassMotion = value);
         SliderRow(stack, "流动幅度", 0, 1, settings.GlassFlowStrength, value => settings.GlassFlowStrength = value, value => $"{value:P0}");
-        SliderRow(stack, "玻璃清晰度", .1, 1, settings.GlassClarity, value => settings.GlassClarity = value, value => $"{value:P0}");
+        if (!settings.LiveGlass) SliderRow(stack, "静态折射清晰度", .1, 1, settings.GlassClarity, value => settings.GlassClarity = value, value => $"{value:P0}");
         SelectRow(stack, "主题", "", new[] { ("System", "跟随系统"), ("Dark", "深色"), ("Light", "浅色") }, settings.Theme, value => settings.Theme = value);
         SliderRow(stack, "Dock 透明度", 0.55, 1, settings.Opacity, value => settings.Opacity = value, value => $"{value:P0}");
         SliderRow(stack, "圆角", 8, 36, settings.CornerRadius, value => settings.CornerRadius = value, value => $"{value:0} px");
@@ -714,6 +724,7 @@ public sealed class ControlCenterWindow : Window
             UpdateGlassMotion();
             _liquid.Refresh();
             WindowBackdrop.Refresh(this, Theme.IsDark, _controller.State.Settings.PowerSaver);
+            UpdateSurfaceTint();
         }
         catch (Exception ex) { ShowError(ex); }
         finally { _savingSettings = false; }
@@ -724,6 +735,17 @@ public sealed class ControlCenterWindow : Window
         _glassRim.AccentColor = Theme.AccentColor;
         _glassRim.MotionStrength = _controller.State.Settings.GlassFlowStrength;
         _glassRim.MotionEnabled = _controller.State.Settings.GlassMotion && _controller.State.Settings.LiquidGlass && !_controller.ReducedMotion;
+    }
+
+    private void UpdateSurfaceTint()
+    {
+        if (WindowBackdrop.GetStatus(this).ClearActive)
+        {
+            var color = ((SolidColorBrush)FindResource("OpaqueSurfaceBrush")).Color;
+            color.A = (byte)Math.Round(_controller.State.Settings.BackdropOpacity * 255);
+            var brush = new SolidColorBrush(color); brush.Freeze(); _shell.Background = brush;
+        }
+        else _shell.SetResourceReference(Border.BackgroundProperty, "SurfaceBrush");
     }
 
     private StackPanel Section(StackPanel parent, string title, string subtitle)
@@ -865,6 +887,13 @@ public sealed class ControlCenterWindow : Window
         if (!_controller.ReducedMotion)
         { _shell.BeginAnimation(OpacityProperty, new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(140)) { EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseOut }, FillBehavior = FillBehavior.Stop }); }
         Dispatcher.BeginInvoke(DispatcherPriority.ContextIdle, () => { stopwatch.Stop(); LastOpenMilliseconds = stopwatch.Elapsed.TotalMilliseconds; });
+    }
+
+    protected override void OnDpiChanged(DpiScale oldDpi, DpiScale newDpi)
+    {
+        base.OnDpiChanged(oldDpi, newDpi);
+        if (Math.Abs(oldDpi.DpiScaleX - newDpi.DpiScaleX) > .001 || Math.Abs(oldDpi.DpiScaleY - newDpi.DpiScaleY) > .001)
+            QueueGridResize();
     }
 
     private void QueueGridResize()

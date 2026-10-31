@@ -54,6 +54,7 @@ public static class Catalog
             app.Name ??= Path.GetFileNameWithoutExtension(app.LaunchPath); app.Arguments ??= "";
             app.WorkingDirectory ??= ""; app.ExecutablePath ??= ""; app.AppUserModelId ??= ""; app.Source ??= "Manual";
             app.DesktopPaths ??= [];
+            app.CustomIconPath = NormalizeIconPath(app.CustomIconPath);
             if (string.IsNullOrWhiteSpace(app.Category)) app.Category = "其他";
             if (!state.Categories.Contains(app.Category)) state.Categories.Add(app.Category);
         }
@@ -61,6 +62,8 @@ public static class Catalog
         var ids = state.Apps.Where(a => !a.Hidden).Select(a => a.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
         state.PinnedIds = state.PinnedIds.Where(ids.Contains).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
         var s = state.Settings;
+        if (!new[] { "Clear", "Frosted" }.Contains(s.LiveGlassStyle)) s.LiveGlassStyle = "Clear";
+        s.BackdropOpacity = double.IsFinite(s.BackdropOpacity) ? Math.Clamp(s.BackdropOpacity, .25, .9) : .65;
         s.Opacity = double.IsFinite(s.Opacity) ? Math.Clamp(s.Opacity, .55, 1) : .88;
         s.GlassClarity = double.IsFinite(s.GlassClarity) ? Math.Clamp(s.GlassClarity, .1, 1) : .65;
         s.GlassFlowStrength = double.IsFinite(s.GlassFlowStrength) ? Math.Clamp(s.GlassFlowStrength, 0, 1) : .45;
@@ -77,5 +80,19 @@ public static class Catalog
         if (s.NameFontFamily.Length > 80 || s.NameFontFamily.Any(c => char.IsControl(c) || c is ':' or '/' or '\\' or '#')) s.NameFontFamily = "";
         if (!new[] { "Bottom", "Top", "Left", "Right" }.Contains(s.Position)) s.Position = "Bottom";
         if (!new[] { "System", "Light", "Dark" }.Contains(s.Theme)) s.Theme = "System";
+    }
+
+    public static string NormalizeIconPath(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value) || value.Length > 4096 || value.Any(char.IsControl)
+            || value.StartsWith("\\\\", StringComparison.Ordinal) || value.Contains("://", StringComparison.Ordinal)
+            || !Path.IsPathFullyQualified(value)) return "";
+        try
+        {
+            var path = Path.GetFullPath(value);
+            if (path.Length < 3 || !char.IsAsciiLetter(path[0]) || path[1] != ':' || path[2] != '\\' || path.IndexOf(':', 2) >= 0) return "";
+            return new[] { ".ico", ".png", ".jpg", ".jpeg", ".exe", ".dll", ".lnk" }.Contains(Path.GetExtension(path).ToLowerInvariant()) ? path : "";
+        }
+        catch (Exception exception) when (exception is ArgumentException or NotSupportedException or PathTooLongException) { return ""; }
     }
 }

@@ -9,8 +9,10 @@
     <Project Path="tests/LumaDock.Activation.Tests/LumaDock.Activation.Tests.csproj" />
     <Project Path="tests/LumaDock.Backdrop.Tests/LumaDock.Backdrop.Tests.csproj" />
     <Project Path="tests/LumaDock.Cadence.Tests/LumaDock.Cadence.Tests.csproj" />
+    <Project Path="tests/LumaDock.Compositor.Ui.Tests/LumaDock.Compositor.Ui.Tests.csproj" />
     <Project Path="tests/LumaDock.Dock.Ui.Tests/LumaDock.Dock.Ui.Tests.csproj" />
     <Project Path="tests/LumaDock.Font.Tests/LumaDock.Font.Tests.csproj" />
+    <Project Path="tests/LumaDock.Icon.Tests/LumaDock.Icon.Tests.csproj" />
     <Project Path="tests/LumaDock.Layout.Tests/LumaDock.Layout.Tests.csproj" />
     <Project Path="tests/LumaDock.Lens.Tests/LumaDock.Lens.Tests.csproj" />
     <Project Path="tests/LumaDock.Sampler.Tests/LumaDock.Sampler.Tests.csproj" />

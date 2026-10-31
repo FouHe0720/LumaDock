@@ -10,7 +10,7 @@ using WpfColor = System.Windows.Media.Color;
 
 namespace LumaDock.Windows;
 
-/// <summary>Supported Windows 11 Desktop Acrylic on ordinary, non-layered WPF windows.</summary>
+/// <summary>Clear extended-frame composition or Desktop Acrylic on ordinary, non-layered WPF windows.</summary>
 public static class WindowBackdrop
 {
     private const int SystemBackdropAttribute = 38;
@@ -21,7 +21,7 @@ public static class WindowBackdrop
     public static bool IsSupported => OperatingSystem.IsWindowsVersionAtLeast(10, 0, 22621);
 
     /// <summary>Call once before the HWND is created. Draw only a translucent tint above this backdrop.</summary>
-    public static void Attach(Window window, Func<bool> isDark, Func<bool> powerSaver)
+    public static void Attach(Window window, Func<bool> isDark, Func<bool> powerSaver, Func<bool>? clearBackdrop = null)
     {
         ArgumentNullException.ThrowIfNull(window);
         ArgumentNullException.ThrowIfNull(isDark);
@@ -30,12 +30,12 @@ public static class WindowBackdrop
         if (Registrations.TryGetValue(window, out _)) return;
         if (window.AllowsTransparency)
             throw new InvalidOperationException("原生玻璃窗口不能使用 WPF 分层透明窗口。请在创建窗口前设置 AllowsTransparency=false。");
-        var registration = new Registration(window, isDark, powerSaver);
+        var registration = new Registration(window, isDark, powerSaver, clearBackdrop);
         Registrations.Add(window, registration);
         registration.Attach();
     }
 
-    /// <summary>Refresh after a theme/performance setting change. Returns whether DWM accepted Acrylic.</summary>
+    /// <summary>Refresh after a theme/performance setting change. Returns whether the selected native composition path is active.</summary>
     public static bool Refresh(Window window, bool isDark, bool powerSaver)
     {
         ArgumentNullException.ThrowIfNull(window);
@@ -49,9 +49,9 @@ public static class WindowBackdrop
         ? registration.Status
         : new(false, IsSupported, null, 0, "Not attached");
 
-    public sealed record BackdropStatus(bool AcrylicActive, bool Supported, int? HResult, int AppliedBackdrop, string Reason);
+    public sealed record BackdropStatus(bool AcrylicActive, bool Supported, int? HResult, int AppliedBackdrop, string Reason, bool ClearActive = false, int NonClientPolicy = 0);
 
-    private sealed class Registration(Window window, Func<bool> isDark, Func<bool> powerSaver)
+    private sealed class Registration(Window window, Func<bool> isDark, Func<bool> powerSaver, Func<bool>? clearBackdrop)
     {
         private readonly WindowChrome chrome = new()
         {
@@ -68,6 +68,7 @@ public static class WindowBackdrop
         private bool hasApplied;
         private bool lastDark;
         private bool lastSavePower;
+        private bool lastClear;
         private string lastEligibility = "";
         public BackdropStatus Status { get; private set; } = new(false, IsSupported, null, 0, "Waiting for window");
 
@@ -76,6 +77,7 @@ public static class WindowBackdrop
             // Keep standard WindowChrome hit testing and resize behavior.
 
             window.SourceInitialized += SourceInitialized;
+            window.Loaded += Loaded;
             window.Closed += Closed;
             WindowChrome.SetWindowChrome(window, chrome);
             window.Background = CanUseAcrylic(powerSaver(), out _) ? WpfBrushes.Transparent : FallbackBrush(isDark());
@@ -93,9 +95,16 @@ public static class WindowBackdrop
             Apply(isDark(), powerSaver());
         }
 
+        private void Loaded(object sender, RoutedEventArgs e)
+        {
+            // WindowChrome finishes native setup after SourceInitialized.
+            // Apply the selected composition policy after that initial setup.
+            hasApplied = false; Apply(isDark(), powerSaver());
+        }
+
         public bool Apply(bool dark, bool savePower)
         {
-            if (closed || applying) return Status.AcrylicActive;
+            if (closed || applying) return Status.AcrylicActive || Status.ClearActive;
             applying = true;
             try
             {
@@ -106,9 +115,14 @@ public static class WindowBackdrop
                     return false;
                 }
                 var eligible = CanUseAcrylic(savePower, out var reason);
-                if (hasApplied && lastDark == dark && lastSavePower == savePower && lastEligibility == reason)
-                    return Status.AcrylicActive;
-                hasApplied = true; lastDark = dark; lastSavePower = savePower; lastEligibility = reason;
+                var clear = clearBackdrop?.Invoke() == true;
+                if (hasApplied && lastDark == dark && lastSavePower == savePower && lastEligibility == reason && lastClear == clear)
+                    return Status.AcrylicActive || Status.ClearActive;
+                hasApplied = true; lastDark = dark; lastSavePower = savePower; lastEligibility = reason; lastClear = clear;
+                // A resizable extended frame otherwise paints its caption colour
+                // beneath the whole client surface. Keep native resize semantics,
+                // but let the clear client pixels composite without that opaque fill.
+                var nonClientPolicy = eligible && clear ? 1 : 0; // DWMNCRP_DISABLED / USEWINDOWSTYLE.
                 var darkMode = dark ? 1 : 0;
                 var corners = 2;
                 DwmSetWindowAttribute(hwnd, 20, ref darkMode, sizeof(int));
@@ -130,10 +144,10 @@ public static class WindowBackdrop
                     var frameResult = DwmExtendFrameIntoClientArea(hwnd, ref margins);
                     if (frameResult >= 0)
                     {
-                        var type = DesktopAcrylic;
+                        var type = clear ? NoBackdrop : DesktopAcrylic;
                         result = DwmSetWindowAttribute(hwnd, SystemBackdropAttribute, ref type, sizeof(int));
                         active = result >= 0;
-                        reason = active ? "Desktop Acrylic" : "DWM rejected Desktop Acrylic";
+                        reason = active ? clear ? "Clear extended frame" : "Desktop Acrylic" : "DWM rejected composition mode";
                     }
                     else { result = frameResult; reason = "DWM frame extension unavailable"; }
                 }
@@ -143,10 +157,16 @@ public static class WindowBackdrop
                 {
                     window.Background = WpfBrushes.Transparent;
                     if (source?.CompositionTarget is { } target) target.BackgroundColor = Colors.Transparent;
-                    if (DwmGetWindowAttribute(hwnd, SystemBackdropAttribute, out applied, sizeof(int)) < 0) applied = DesktopAcrylic;
+                    if (DwmGetWindowAttribute(hwnd, SystemBackdropAttribute, out applied, sizeof(int)) < 0) applied = clear ? NoBackdrop : DesktopAcrylic;
+                    var policyResult = DwmSetWindowAttribute(hwnd, 2, ref nonClientPolicy, sizeof(int));
+                    var extended = new Margins(-1);
+                    var extensionResult = DwmExtendFrameIntoClientArea(hwnd, ref extended);
+                    if (clear && (policyResult < 0 || extensionResult < 0)) { active = false; reason = "Clear composition unavailable"; }
                 }
-                else
+                if (!active)
                 {
+                    nonClientPolicy = 0;
+                    DwmSetWindowAttribute(hwnd, 2, ref nonClientPolicy, sizeof(int));
                     var none = NoBackdrop;
                     if (IsSupported) DwmSetWindowAttribute(hwnd, SystemBackdropAttribute, ref none, sizeof(int));
                     chrome.GlassFrameThickness = new Thickness(0);
@@ -157,7 +177,7 @@ public static class WindowBackdrop
                     if (source?.CompositionTarget is { } target) target.BackgroundColor = fallback.Color;
                     applied = NoBackdrop;
                 }
-                Status = new(active, IsSupported, result, applied, reason);
+                Status = new(active && !clear, IsSupported, result, applied, reason, active && clear, nonClientPolicy);
                 return active;
             }
             finally { applying = false; }
@@ -180,9 +200,9 @@ public static class WindowBackdrop
                 return IntPtr.Zero;
             }
             // Reapply only on composition/theme/accessibility/session changes, never on a frame timer.
-            if (message is 0x031E /* WM_DWMCOMPOSITIONCHANGED */ or 0x031A /* WM_THEMECHANGED */ or 0x001A /* WM_SETTINGCHANGE */ or 0x02B1 /* WM_WTSSESSION_CHANGE */ or 0x0218 /* WM_POWERBROADCAST */)
+            if (message is 0x031E /* WM_DWMCOMPOSITIONCHANGED */ or 0x031A /* WM_THEMECHANGED */ or 0x02E0 /* WM_DPICHANGED */ or 0x001A /* WM_SETTINGCHANGE */ or 0x02B1 /* WM_WTSSESSION_CHANGE */ or 0x0218 /* WM_POWERBROADCAST */)
             {
-                if (message is 0x031E or 0x031A) hasApplied = false;
+                if (message is 0x031E or 0x031A or 0x02E0) hasApplied = false;
                 if (!refreshQueued && !closed && !window.Dispatcher.HasShutdownStarted)
                 {
                     refreshQueued = true;
@@ -200,6 +220,7 @@ public static class WindowBackdrop
         {
             closed = true;
             window.SourceInitialized -= SourceInitialized;
+            window.Loaded -= Loaded;
             window.Closed -= Closed;
             if (source != null) { WTSUnRegisterSessionNotification(source.Handle); source.RemoveHook(Hook); }
             source = null;

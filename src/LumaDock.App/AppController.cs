@@ -129,6 +129,24 @@ public sealed class AppController : IDisposable
     }
     public void Pin(AppEntry app) { app.Hidden = false; if (!State.PinnedIds.Contains(app.Id)) State.PinnedIds.Add(app.Id); Save(); }
     public void Unpin(AppEntry app) { State.PinnedIds.Remove(app.Id); Save(); }
+    public void SetCustomIcon(AppEntry app, string? path)
+    {
+        var normalized = Catalog.NormalizeIconPath(path);
+        if (!string.IsNullOrEmpty(path) && (normalized.Length == 0 || !File.Exists(normalized)))
+            throw new InvalidDataException("请选择本地图片、图标或程序文件。");
+        app.CustomIconPath = normalized; Save();
+    }
+    public void ChooseIcon(AppEntry app, Window owner)
+    {
+        var picker = new Microsoft.Win32.OpenFileDialog
+        {
+            Title = "更换应用图标", CheckFileExists = true, Multiselect = false,
+            Filter = "图标、图片与程序|*.ico;*.png;*.jpg;*.jpeg;*.exe;*.dll;*.lnk"
+        };
+        if (picker.ShowDialog(owner) != true) return;
+        try { SetCustomIcon(app, picker.FileName); }
+        catch (Exception error) { Notify(error.Message); }
+    }
     public void Remove(AppEntry app) { app.Hidden = true; State.PinnedIds.Remove(app.Id); Save(); }
     public void AddManual(string path)
     {
@@ -170,6 +188,11 @@ public sealed class AppController : IDisposable
         if (diagnostics == null) return;
         metrics[surface + "Glass"] = new { source, milliseconds }; WriteMetrics();
     }
+    internal void RecordGlassCompositor(string surface, string source)
+    {
+        if (diagnostics == null) return;
+        metrics[surface + "Glass"] = new { source, applicationSampling = false }; WriteMetrics();
+    }
     internal async void RecordDockFrame()
     {
         metrics.TryAdd("startupToDockMs", Program.Clock.Elapsed.TotalMilliseconds); WriteMetrics();
@@ -197,7 +220,7 @@ public sealed class AppController : IDisposable
     {
         var apps = State.Apps;
         State = new AppState { Apps = apps, Settings = new DockSettings { StartWithWindows = StartupService.IsEnabled } };
-        foreach (var a in State.Apps) { a.Hidden = false; a.Category = Catalog.SuggestCategory(a.Name); }
+        foreach (var a in State.Apps) { a.Hidden = false; a.Category = Catalog.SuggestCategory(a.Name); a.CustomIconPath = ""; }
         ApplySettings();
     }
     public void Notify(string message)
