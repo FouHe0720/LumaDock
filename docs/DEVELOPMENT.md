@@ -63,7 +63,7 @@ WSL 可用于编辑文件，但 Linux 构建结果不能代替 Windows WPF 编�
 | `scripts/test-compositor-ui.ps1` | 实时合成、静态切换、已知背景变化与资源停止 | Windows 交互会话 |
 | `scripts/test-windows.ps1` | Shell、真实图标、显示器和窗口身份 | Windows 交互会话 |
 | `scripts/test-font.ps1` | 系统图标字体读取与释放 | Windows |
-| `scripts/test-typography-ui.ps1` | 实际 WPF 字体、预览、导航与流光停止 | Windows 交互会话 |
+| `scripts/test-typography-ui.ps1` | 实际 WPF 栏目字体、文字颜色、预览、导航与流光停止 | Windows 交互会话 |
 | `scripts/test-dock-ui.ps1` | Dock 四边与三轮廓、放大边界、命中、滚动与动画停止 | Windows 交互会话 |
 | `scripts/test-ui.ps1` | 窗口循环、重建和开合回归 | Windows 交互会话 |
 | `scripts/test-activation.ps1` | 多进程单实例激活 | Windows |

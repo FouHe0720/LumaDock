@@ -13,45 +13,36 @@ public static class AppDiscovery
     public static List<AppEntry> Scan() => OnSta(() =>
     {
         var entries = new List<AppEntry>();
-        object? scriptShell = null;
+        object? scriptShell = null, propertyShell = null;
         try
         {
             scriptShell = Activator.CreateInstance(Type.GetTypeFromProgID("WScript.Shell")!);
+            propertyShell = Activator.CreateInstance(Type.GetTypeFromProgID("Shell.Application")!);
             foreach (var folder in new[] { Environment.SpecialFolder.StartMenu, Environment.SpecialFolder.CommonStartMenu,
                          Environment.SpecialFolder.DesktopDirectory, Environment.SpecialFolder.CommonDesktopDirectory })
-                ScanFolder(Environment.GetFolderPath(folder), scriptShell, entries,
+                ScanFolder(Environment.GetFolderPath(folder), scriptShell, propertyShell, entries,
                     folder is Environment.SpecialFolder.DesktopDirectory or Environment.SpecialFolder.CommonDesktopDirectory ? "Desktop" : "StartMenu",
                     folder is not (Environment.SpecialFolder.DesktopDirectory or Environment.SpecialFolder.CommonDesktopDirectory));
             DiscoverPackaged(entries);
         }
-        finally { Release(scriptShell); }
-        var merged = new Dictionary<string, AppEntry>(StringComparer.OrdinalIgnoreCase);
-        foreach (var entry in entries)
-        {
-            var key = !string.IsNullOrWhiteSpace(entry.ExecutablePath)
-                ? "target:" + Environment.ExpandEnvironmentVariables(entry.ExecutablePath) + "|" + entry.Arguments
-                : !string.IsNullOrWhiteSpace(entry.AppUserModelId) ? "aumid:" + entry.AppUserModelId : "file:" + entry.LaunchPath;
-            if (merged.TryGetValue(key, out var existing))
-            {
-                if (string.IsNullOrEmpty(existing.AppUserModelId)) existing.AppUserModelId = entry.AppUserModelId;
-                existing.DesktopPaths.AddRange(entry.DesktopPaths.Except(existing.DesktopPaths, StringComparer.OrdinalIgnoreCase));
-            }
-            else merged.Add(key, entry);
-        }
-        return merged.Values.OrderBy(e => e.Name, StringComparer.CurrentCultureIgnoreCase).ToList();
+        finally { Release(propertyShell); Release(scriptShell); }
+        var state = new AppState { Apps = entries };
+        Catalog.Deduplicate(state);
+        return state.Apps.OrderBy(e => e.Name, StringComparer.CurrentCultureIgnoreCase).ToList();
     });
 
     public static List<AppEntry> DesktopEntries() => OnSta(() =>
     {
         var entries = new List<AppEntry>();
-        object? scriptShell = null;
+        object? scriptShell = null, propertyShell = null;
         try
         {
             scriptShell = Activator.CreateInstance(Type.GetTypeFromProgID("WScript.Shell")!);
-            ScanFolder(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), scriptShell, entries, "Desktop", false);
-            ScanFolder(Environment.GetFolderPath(Environment.SpecialFolder.CommonDesktopDirectory), scriptShell, entries, "Desktop", false);
+            propertyShell = Activator.CreateInstance(Type.GetTypeFromProgID("Shell.Application")!);
+            ScanFolder(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), scriptShell, propertyShell, entries, "Desktop", false);
+            ScanFolder(Environment.GetFolderPath(Environment.SpecialFolder.CommonDesktopDirectory), scriptShell, propertyShell, entries, "Desktop", false);
         }
-        finally { Release(scriptShell); }
+        finally { Release(propertyShell); Release(scriptShell); }
         return entries.GroupBy(e => e.Id, StringComparer.OrdinalIgnoreCase).Select(g => g.First()).ToList();
     });
 
@@ -59,16 +50,21 @@ public static class AppDiscovery
     {
         path = Path.GetFullPath(path);
         if (!File.Exists(path)) throw new FileNotFoundException("应用路径不存在。", path);
-        object? shell = null;
+        object? shell = null, propertyShell = null;
         try
         {
             shell = Activator.CreateInstance(Type.GetTypeFromProgID("WScript.Shell")!);
-            return Resolve(path, shell, "Manual");
+            propertyShell = Activator.CreateInstance(Type.GetTypeFromProgID("Shell.Application")!);
+            var directory = Path.GetDirectoryName(path);
+            var desktop = new[] { Environment.SpecialFolder.DesktopDirectory, Environment.SpecialFolder.CommonDesktopDirectory }
+                .Select(Environment.GetFolderPath).Where(value => !string.IsNullOrWhiteSpace(value))
+                .Any(value => string.Equals(Path.GetFullPath(value).TrimEnd(Path.DirectorySeparatorChar), directory, StringComparison.OrdinalIgnoreCase));
+            return Resolve(path, shell, propertyShell, desktop ? "Desktop" : "Manual");
         }
-        finally { Release(shell); }
+        finally { Release(propertyShell); Release(shell); }
     });
 
-    private static void ScanFolder(string folder, object? scriptShell, List<AppEntry> entries, string source, bool recursive = true)
+    private static void ScanFolder(string folder, object? scriptShell, object? propertyShell, List<AppEntry> entries, string source, bool recursive = true)
     {
         if (string.IsNullOrWhiteSpace(folder) || !Directory.Exists(folder)) return;
         try
@@ -78,19 +74,19 @@ public static class AppDiscovery
                 var ext = Path.GetExtension(file);
                 if (ext.Equals(".lnk", StringComparison.OrdinalIgnoreCase) || ext.Equals(".url", StringComparison.OrdinalIgnoreCase) || ext.Equals(".exe", StringComparison.OrdinalIgnoreCase))
                 {
-                    try { entries.Add(Resolve(file, scriptShell, source)); }
+                    try { entries.Add(Resolve(file, scriptShell, propertyShell, source)); }
                     catch (Exception ex) { Debug.WriteLine($"LumaDock discovery {file}: {ex.Message}"); }
                 }
             }
             if (recursive)
                 foreach (var directory in Directory.EnumerateDirectories(folder))
                     if ((File.GetAttributes(directory) & FileAttributes.ReparsePoint) == 0)
-                        ScanFolder(directory, scriptShell, entries, source);
+                        ScanFolder(directory, scriptShell, propertyShell, entries, source);
         }
         catch (Exception ex) when (ex is UnauthorizedAccessException or IOException) { Debug.WriteLine(ex.Message); }
     }
 
-    private static AppEntry Resolve(string path, object? scriptShell, string source)
+    private static AppEntry Resolve(string path, object? scriptShell, object? propertyShell, string source)
     {
         var result = new AppEntry { Name = Path.GetFileNameWithoutExtension(path), LaunchPath = path,
             ExecutablePath = Path.GetExtension(path).Equals(".exe", StringComparison.OrdinalIgnoreCase) ? path : "", Source = source };
@@ -106,12 +102,46 @@ public static class AppDiscovery
             }
             catch (COMException ex) { Debug.WriteLine(ex.Message); }
             finally { Release(shortcut); }
+            ReadLinkProperties(path, propertyShell, result);
         }
         // Path identity preserves distinct shortcut arguments and user organizing choices.
         result.Id = StableId("file:" + path.ToUpperInvariant());
         if (source == "Desktop") result.DesktopPaths.Add(path);
-        result.Category = GuessCategory(result.Name);
+        result.Category = Catalog.SuggestCategory(result); result.CategoryRuleVersion = Catalog.CategoryRuleVersion;
         return result;
+    }
+
+    private static void ReadLinkProperties(string path, object? shell, AppEntry entry)
+    {
+        if (shell == null) return;
+        object? folder = null, item = null, link = null, targetItem = null;
+        try
+        {
+            folder = ((dynamic)shell).NameSpace(Path.GetDirectoryName(path));
+            if (folder == null) return;
+            item = ((dynamic)folder).ParseName(Path.GetFileName(path));
+            if (item == null) return;
+            entry.AppUserModelId = Convert.ToString(((dynamic)item).ExtendedProperty("System.AppUserModel.ID")) ?? "";
+            var target = Convert.ToString(((dynamic)item).ExtendedProperty("System.Link.TargetParsingPath")) ?? "";
+            if (string.IsNullOrEmpty(entry.ExecutablePath) && !string.IsNullOrWhiteSpace(target)) entry.ExecutablePath = target;
+            if (string.IsNullOrWhiteSpace(entry.AppUserModelId) && (string.IsNullOrWhiteSpace(entry.ExecutablePath) || !Path.IsPathFullyQualified(entry.ExecutablePath)))
+            {
+                // A PIDL-only packaged-app shortcut may expose a bare AUMID as its target parsing path.
+                // Read the target's authoritative Shell property rather than guessing from an exclamation mark.
+                link = ((dynamic)item).GetLink;
+                targetItem = ((dynamic)link).Target;
+                if (targetItem != null) entry.AppUserModelId = Convert.ToString(((dynamic)targetItem).ExtendedProperty("System.AppUserModel.ID")) ?? "";
+            }
+            if (!string.IsNullOrEmpty(entry.AppUserModelId) && string.Equals(entry.ExecutablePath, entry.AppUserModelId, StringComparison.OrdinalIgnoreCase)) entry.ExecutablePath = "";
+            foreach (var candidate in new[] { entry.ExecutablePath, target })
+            {
+                foreach (var prefix in new[] { "shell:AppsFolder\\", "::{4234d49b-0245-4df3-b780-3893943456e1}\\" })
+                    if (candidate.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                    { entry.AppUserModelId = candidate[prefix.Length..]; entry.ExecutablePath = ""; break; }
+            }
+        }
+        catch (Exception error) when (error is COMException or Microsoft.CSharp.RuntimeBinder.RuntimeBinderException) { Debug.WriteLine(error.Message); }
+        finally { Release(targetItem); Release(link); Release(item); Release(folder); }
     }
 
     private static void DiscoverPackaged(List<AppEntry> entries)
@@ -136,9 +166,10 @@ public static class AppDiscovery
                     string target = Convert.ToString(((dynamic)item).ExtendedProperty("System.Link.TargetParsingPath")) ?? "";
                     string args = Convert.ToString(((dynamic)item).ExtendedProperty("System.Link.Arguments")) ?? "";
                     // AppsFolder also lists Win32 entries; keep its stable Shell identifier.
-                    entries.Add(new AppEntry { Id = StableId("aumid:" + id), Name = name, AppUserModelId = id,
+                    var entry = new AppEntry { Id = StableId("aumid:" + id), Name = name, AppUserModelId = id,
                         LaunchPath = "shell:AppsFolder\\" + id, ExecutablePath = target, Arguments = args,
-                        Source = "AppsFolder", Category = GuessCategory(name) });
+                        Source = "AppsFolder", CategoryRuleVersion = Catalog.CategoryRuleVersion };
+                    entry.Category = Catalog.SuggestCategory(entry); entries.Add(entry);
                 }
                 catch (Exception ex) when (ex is COMException or Microsoft.CSharp.RuntimeBinder.RuntimeBinderException) { Debug.WriteLine(ex.Message); }
                 finally { Release(item); }
@@ -149,18 +180,6 @@ public static class AppDiscovery
     }
 
     public static string StableId(string identity) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(identity)))[..24];
-    private static string GuessCategory(string name)
-    {
-        var text = name.ToLowerInvariant();
-        if (new[] { "visual", "code", "terminal", "python", "git", "docker", "开发", "powershell" }.Any(text.Contains)) return "开发工具";
-        if (new[] { "edge", "chrome", "firefox", "browser", "浏览" }.Any(text.Contains)) return "浏览器";
-        if (new[] { "word", "excel", "office", "note", "pdf", "文档", "笔记", "学习" }.Any(text.Contains)) return "办公学习";
-        if (new[] { "music", "video", "player", "音乐", "视频", "照片" }.Any(text.Contains)) return "影音娱乐";
-        if (new[] { "steam", "game", "游戏", "xbox" }.Any(text.Contains)) return "游戏";
-        if (new[] { "设置", "管理", "工具", "控制", "system", "windows", "计算器" }.Any(text.Contains)) return "系统工具";
-        return "其他";
-    }
-
     internal static T OnSta<T>(Func<T> action)
     {
         if (Thread.CurrentThread.GetApartmentState() == ApartmentState.STA) return action();

@@ -10,6 +10,63 @@ namespace LumaDock.App.Center;
 /// <summary>Small native templates with no frame loop or external visual dependency.</summary>
 internal static class CenterStyles
 {
+    internal static Style ScrollBarStyle() => (Style)XamlReader.Parse("""
+        <Style xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" TargetType="ScrollBar">
+          <Setter Property="Width" Value="9"/>
+          <Setter Property="MinWidth" Value="9"/>
+          <Setter Property="Background" Value="Transparent"/>
+          <Setter Property="Focusable" Value="False"/>
+          <Setter Property="Template">
+            <Setter.Value>
+              <ControlTemplate TargetType="ScrollBar">
+                <Grid Background="Transparent" SnapsToDevicePixels="True">
+                  <Track x:Name="PART_Track" Minimum="{TemplateBinding Minimum}" Maximum="{TemplateBinding Maximum}" Value="{TemplateBinding Value}" ViewportSize="{TemplateBinding ViewportSize}" Orientation="{TemplateBinding Orientation}" IsDirectionReversed="True">
+                    <Track.DecreaseRepeatButton>
+                      <RepeatButton x:Name="Decrease" Command="{x:Static ScrollBar.PageUpCommand}" Focusable="False">
+                        <RepeatButton.Template><ControlTemplate TargetType="RepeatButton"><Border Background="Transparent"/></ControlTemplate></RepeatButton.Template>
+                      </RepeatButton>
+                    </Track.DecreaseRepeatButton>
+                    <Track.Thumb>
+                      <Thumb x:Name="Grip" MinHeight="28" Margin="2,3,2,3" Focusable="False">
+                        <Thumb.Template>
+                          <ControlTemplate TargetType="Thumb">
+                            <Border x:Name="Face" Background="{DynamicResource CaptionBrush}" CornerRadius="2.5" Opacity="0.46"/>
+                            <ControlTemplate.Triggers>
+                              <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Face" Property="Opacity" Value="0.8"/></Trigger>
+                              <Trigger Property="IsDragging" Value="True"><Setter TargetName="Face" Property="Opacity" Value="0.95"/></Trigger>
+                              <Trigger Property="IsEnabled" Value="False"><Setter TargetName="Face" Property="Opacity" Value="0.2"/></Trigger>
+                            </ControlTemplate.Triggers>
+                          </ControlTemplate>
+                        </Thumb.Template>
+                      </Thumb>
+                    </Track.Thumb>
+                    <Track.IncreaseRepeatButton>
+                      <RepeatButton x:Name="Increase" Command="{x:Static ScrollBar.PageDownCommand}" Focusable="False">
+                        <RepeatButton.Template><ControlTemplate TargetType="RepeatButton"><Border Background="Transparent"/></ControlTemplate></RepeatButton.Template>
+                      </RepeatButton>
+                    </Track.IncreaseRepeatButton>
+                  </Track>
+                </Grid>
+                <ControlTemplate.Triggers>
+                  <Trigger Property="Orientation" Value="Horizontal">
+                    <Setter Property="Width" Value="Auto"/>
+                    <Setter Property="MinWidth" Value="0"/>
+                    <Setter Property="Height" Value="9"/>
+                    <Setter Property="MinHeight" Value="9"/>
+                    <Setter TargetName="PART_Track" Property="IsDirectionReversed" Value="False"/>
+                    <Setter TargetName="Grip" Property="MinHeight" Value="0"/>
+                    <Setter TargetName="Grip" Property="MinWidth" Value="28"/>
+                    <Setter TargetName="Grip" Property="Margin" Value="3,2,3,2"/>
+                    <Setter TargetName="Decrease" Property="Command" Value="{x:Static ScrollBar.PageLeftCommand}"/>
+                    <Setter TargetName="Increase" Property="Command" Value="{x:Static ScrollBar.PageRightCommand}"/>
+                  </Trigger>
+                </ControlTemplate.Triggers>
+              </ControlTemplate>
+            </Setter.Value>
+          </Setter>
+        </Style>
+        """);
+
     internal static readonly ControlTemplate SliderTemplate = (ControlTemplate)XamlReader.Parse("""
         <ControlTemplate xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" TargetType="Slider">
           <Grid Height="24" Background="Transparent" SnapsToDevicePixels="True">
@@ -63,17 +120,23 @@ internal static class CenterStyles
           <Setter Property="BorderBrush" Value="{DynamicResource GlassHighlightBrush}"/>
           <Setter Property="BorderThickness" Value="1"/>
           <Setter Property="FontSize" Value="12"/>
+          <Setter Property="FontFamily" Value="{DynamicResource UiTextFamily}"/>
+          <Setter Property="FontWeight" Value="{DynamicResource UiTextWeight}"/>
+          <Setter Property="FontStyle" Value="{DynamicResource UiTextStyle}"/>
           <Setter Property="ItemContainerStyle">
             <Setter.Value>
               <Style TargetType="ComboBoxItem">
                 <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
+                <Setter Property="FontFamily" Value="{DynamicResource UiTextFamily}"/>
+                <Setter Property="FontWeight" Value="{DynamicResource UiTextWeight}"/>
+                <Setter Property="FontStyle" Value="{DynamicResource UiTextStyle}"/>
                 <Setter Property="Padding" Value="12,9"/>
                 <Setter Property="Template">
                   <Setter.Value><ControlTemplate TargetType="ComboBoxItem">
                     <Border x:Name="Item" CornerRadius="6" Background="Transparent" Padding="{TemplateBinding Padding}" Margin="3,1"><ContentPresenter/></Border>
                     <ControlTemplate.Triggers>
                       <Trigger Property="IsHighlighted" Value="True"><Setter TargetName="Item" Property="Background" Value="{DynamicResource BorderBrush}"/></Trigger>
-                      <Trigger Property="IsSelected" Value="True"><Setter Property="FontWeight" Value="SemiBold"/></Trigger>
+                      <Trigger Property="IsSelected" Value="True"><Setter Property="FontWeight" Value="{DynamicResource UiEmphasisWeight}"/></Trigger>
                     </ControlTemplate.Triggers>
                   </ControlTemplate></Setter.Value>
                 </Setter>

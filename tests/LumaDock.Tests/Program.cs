@@ -216,6 +216,106 @@ Test("Custom icons reject network, device, URL and relative imports", () =>
         Assert(Catalog.NormalizeIconPath(path) == "", "Accepted nonlocal or unsupported icon path");
     Assert(Catalog.NormalizeIconPath(null) == "");
 });
+Test("Browser shortcut attribution collapses one app and remaps pins without losing custom data", () =>
+{
+    var menu = Entry("menu", "Microsoft Edge", "浏览器"); menu.Source = "StartMenu";
+    menu.ExecutablePath = @"C:\Program Files\Microsoft\Edge\Application\msedge.exe"; menu.Arguments = "--source-shortcut-location=start-menu";
+    var desktop = Entry("desktop", "Microsoft Edge", "我的浏览器"); desktop.Source = "Desktop";
+    desktop.ExecutablePath = menu.ExecutablePath.ToUpperInvariant(); desktop.Arguments = "--source-shortcut-location=desktop";
+    desktop.CustomIconPath = @"C:\fixture\edge.ico"; desktop.DesktopPaths = [@"C:\fixture\Desktop\Edge.lnk"];
+    var state = new AppState { Apps = [menu, desktop], PinnedIds = ["desktop", "menu"] };
+    Catalog.Normalize(state);
+    Assert(state.Apps.Count == 1 && state.Apps[0].Id == "menu" && state.PinnedIds.SequenceEqual(["menu"]));
+    Assert(menu.Category == "我的浏览器" && menu.CategoryIsUserAssigned && menu.CustomIconPath == desktop.CustomIconPath);
+    Assert(menu.DesktopPaths.SequenceEqual(desktop.DesktopPaths) && menu.Arguments == "--source-shortcut-location=start-menu", "Original launch command was modified");
+});
+Test("Application identities preserve profiles, argument case and distinct hosted app IDs", () =>
+{
+    var first = Entry("a"); first.LaunchPath = first.ExecutablePath = @"C:\fixture\msedge.exe"; first.Arguments = "--profile-directory=Default";
+    var second = Entry("b"); second.LaunchPath = second.ExecutablePath = first.ExecutablePath; second.Arguments = "--profile-directory=Profile2";
+    Assert(!AppIdentity.AreEquivalent(first, second), "Profiles on the same executable were merged");
+    second.Arguments = "--profile-directory=default"; Assert(!AppIdentity.AreEquivalent(first, second), "Arguments were case-folded");
+    first.Arguments = second.Arguments = ""; first.AppUserModelId = "host!First"; second.AppUserModelId = "host!Second";
+    Assert(!AppIdentity.AreEquivalent(first, second), "Different hosted app IDs were merged");
+    second.AppUserModelId = first.AppUserModelId; second.Arguments = "--private";
+    Assert(!AppIdentity.AreEquivalent(first, second), "AUMID hid a distinct launch argument");
+});
+Test("Unknown executables and quoted source-location text retain their arguments", () =>
+{
+    var first = Entry("a"); var second = Entry("b"); second.ExecutablePath = first.ExecutablePath;
+    first.Arguments = "--source-shortcut-location=start-menu"; second.Arguments = "--source-shortcut-location=desktop";
+    Assert(!AppIdentity.AreEquivalent(first, second));
+    first.ExecutablePath = second.ExecutablePath = @"C:\fixture\msedge.exe";
+    first.Arguments = "--label \"text --source-shortcut-location=start-menu suffix\"";
+    second.Arguments = "--label \"text --source-shortcut-location=desktop suffix\"";
+    Assert(!AppIdentity.AreEquivalent(first, second), "A switch embedded inside quoted text was stripped");
+    first.Arguments = "--profile-directory=Default --source-shortcut-location=start-menu --new-window";
+    second.Arguments = "--profile-directory=Default --source-shortcut-location=desktop --new-window";
+    Assert(AppIdentity.AreEquivalent(first, second));
+});
+Test("Different working directories preserve distinct relative-file launch actions", () =>
+{
+    var first = Entry("a"); var second = Entry("b"); second.ExecutablePath = first.ExecutablePath;
+    first.Arguments = second.Arguments = "local-project.json";
+    first.WorkingDirectory = @"C:\fixture\project-one"; second.WorkingDirectory = @"C:\fixture\project-two";
+    Assert(!AppIdentity.AreEquivalent(first, second));
+    second.WorkingDirectory = first.WorkingDirectory.ToUpperInvariant(); Assert(AppIdentity.AreEquivalent(first, second));
+});
+Test("Same display names alone never collapse separate programs or uninstall actions", () =>
+{
+    var first = Entry("a", "Editor"); var second = Entry("b", "Editor");
+    Assert(!AppIdentity.AreEquivalent(first, second));
+    second.ExecutablePath = first.ExecutablePath; second.Arguments = "--uninstall";
+    Assert(!AppIdentity.AreEquivalent(first, second));
+});
+Test("A late Shell record connects AUMID-only and file identities without changing first order", () =>
+{
+    var first = Entry("first", "Fixture");
+    var shell = Entry("shell", "Fixture"); shell.LaunchPath = "shell:AppsFolder\\Fixture!App"; shell.ExecutablePath = ""; shell.AppUserModelId = "Fixture!App"; shell.Source = "AppsFolder";
+    var bridge = Entry("bridge", "Fixture"); bridge.ExecutablePath = first.ExecutablePath; bridge.AppUserModelId = shell.AppUserModelId;
+    var state = new AppState { Apps = [first, shell, bridge], PinnedIds = ["shell", "bridge"] };
+    Catalog.Normalize(state);
+    Assert(state.Apps.Count == 1 && state.Apps[0].Id == "first" && state.PinnedIds.SequenceEqual(["first"]));
+});
+Test("Discovery aliases retain existing hidden tombstones and manual grouping", () =>
+{
+    var old = Entry("old", "Fixture", "保留分组", true); old.CustomIconPath = @"C:\fixture\brand.ico";
+    var found = Entry("found", "Fixture"); found.ExecutablePath = old.ExecutablePath; found.Source = "StartMenu";
+    var state = new AppState { Apps = [old], PinnedIds = [] };
+    Catalog.Merge(state, [found]);
+    Assert(state.Apps.Count == 1 && state.Apps[0].Id == "old" && old.Hidden && old.Category == "保留分组" && old.CustomIconPath.EndsWith("brand.ico"));
+    Assert(ReferenceEquals(Catalog.FindEquivalent(state, found), old));
+});
+Test("Legacy automatic classifications migrate while manual choices survive future discovery", () =>
+{
+    var game = Entry("game", "无畏契约", "其他"); var design = Entry("design", "Autodesk Fusion", "其他");
+    var chat = Entry("chat", "飞书", "其他"); var manual = Entry("manual", "Firefox", "游戏");
+    var state = new AppState { Apps = [game, design, chat, manual] }; Catalog.Normalize(state);
+    Assert(game.Category == "游戏" && design.Category == "创作设计" && chat.Category == "社交通讯");
+    Assert(manual.Category == "游戏" && manual.CategoryIsUserAssigned);
+    Catalog.AssignCategory(game, "其他"); Catalog.Merge(state, [Entry("game", "无畏契约")]);
+    Assert(game.Category == "其他" && game.CategoryIsUserAssigned && state.Categories.Contains("创作设计") && state.Categories.Contains("社交通讯"));
+});
+Test("Product classification uses recognizable names without loose code or git substrings", () =>
+{
+    foreach (var (name, category) in new[] { ("Visual Studio Code", "开发工具"), ("GitHub Desktop", "开发工具"), ("Digital Clock", "其他"), ("Video Codec Sample", "影音娱乐"), ("Bridge Studio", "其他"), ("Microsoft Edge", "浏览器"), ("Microsoft Teams", "社交通讯"), ("便笺", "办公学习"), ("获取帮助", "系统工具"), ("单击以执行", "系统工具"), ("截图工具", "系统工具"), ("卸载 Firefox", "系统工具"), ("酷狗音乐", "影音娱乐"), ("无畏契约", "游戏"), ("Autodesk Fusion", "创作设计"), ("Component Services", "系统工具"), ("Task Scheduler", "系统工具"), ("Microsoft Clipchamp", "创作设计"), ("WSL", "开发工具") })
+        Assert(Catalog.SuggestCategory(name) == category, "Incorrect category for " + name);
+    var unknown = Entry("unknown", "自定义名称", "其他"); unknown.ExecutablePath = @"C:\fixture\winword.exe";
+    Assert(Catalog.SuggestCategory(unknown) == "办公学习", "Recognized executable metadata was ignored");
+});
+Test("Manual category provenance survives persistence and reclassification", () =>
+{
+    var state = new AppState { Apps = [Entry("a", "Firefox", "浏览器")] }; Catalog.AssignCategory(state.Apps[0], "其他");
+    var store = Store("category-provenance"); store.Save(state); var read = store.Load();
+    Assert(read.Apps[0].CategoryIsUserAssigned && read.Apps[0].Category == "其他" && read.Apps[0].CategoryRuleVersion == Catalog.CategoryRuleVersion);
+    Catalog.Merge(read, [Entry("a", "Firefox")]); Assert(read.Apps[0].Category == "其他");
+});
+Test("Text colors normalize to bounded opaque RGB and reject brushes or markup", () =>
+{
+    Assert(Catalog.NormalizeTextColor(" #c0a1ff ") == "#C0A1FF");
+    foreach (var value in new[] { "", "red", "#12345", "#00112233", "{DynamicResource TextBrush}", "#GGGGGG", "https://example.invalid/brush" })
+        Assert(Catalog.NormalizeTextColor(value) == "");
+});
 var reportIndex = Array.IndexOf(args, "--report");
 var report = new { timestamp = DateTimeOffset.Now, os = Environment.OSVersion.ToString(), framework = System.Runtime.InteropServices.RuntimeInformation.FrameworkDescription, passed = results.Count(r => r.Passed), failed = results.Count(r => !r.Passed), cases = results, fixtureDirectory = root };
 var json = JsonSerializer.Serialize(report, new JsonSerializerOptions { WriteIndented = true });

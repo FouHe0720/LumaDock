@@ -2,7 +2,38 @@
 
 验证区分组件测试、真实 Windows WPF 检查、交互检查与性能采样。编译通过不等于所有桌面环境已经验收。
 
-## 0.8.0
+## 0.9.0
+
+测试日期：2026-11-01。Windows 11 x64 build 26300，16 个逻辑处理器，单屏 2560×1440。
+
+| 项目 | 实际结果 | 记录 |
+| --- | --- | --- |
+| Release 解决方案 | 19 个项目，0 警告、0 错误 | `scripts/build.ps1` |
+| Core / Storage | 41/41；去重、参数、工作目录、旧 ID 映射、分类归属与颜色校验 | `artifacts/tests/results-0.9.json` |
+| Dock WPF 与 OLE 数据 | 50/50；四边插入、首尾和中间落点、保存、悬停、关闭计时器及延迟 `CF_HDROP` | `artifacts/tests/dock-ui-0.9-results.json` |
+| Windows Shell | 12/12；真实快捷方式导出与重读、参数、工作目录、同名避让、源文件保持、打包应用 AUMID | `artifacts/tests/windows-results-0.9.json` |
+| 系统字体 | 5/5，只读当前真实 Windows 字体、稳定刷新与释放 | `artifacts/tests/font-results-0.9.json` |
+| 图标服务 | 14/14，透明通道、真实资源、DPI 尺寸、有界缓存和释放 | `artifacts/tests/icon-results-0.9.json` |
+| 字体与设置界面 | 35/35；栏目字重、颜色操作、保存、主题、设置滚动及聚焦光标资源回归 | `artifacts/tests/typography-ui-0.9-results.json` |
+| 背景合成 | 20/20；主窗与 Dock 各 10 次已知色相位全部跟随；切换、失焦、尺寸、取消、省电与关闭 | `artifacts/tests/compositor-ui-0.9-results.json` |
+| 生命周期 | 100 次显示、搜索和隐藏，3 次重建、关闭途中唤回，通过 | `artifacts/tests/ui-results-0.9.json` |
+| 实际鼠标排序 | 快速拖动、中间插入、可见顺序与落盘配置一致，隔离源文件哈希保持 | `artifacts/tests/drag-interaction-0.9-results.json` |
+| 分类只读审计 | Edge 2→1，剩余等价对 0；原配置字节未改动 | `artifacts/tests/catalog-audit-0.9-results.json` |
+| 自包含启动 | 移除 SDK 环境与路径后完成扫描、显示并正常退出；退出码 0，14.124 秒 | `artifacts/tests/portable-smoke-0.9-results.json` |
+| 日常快捷方式 | 连续两次启动为同一驻留 PID；应用窗口可见、非分层，使用清透背景与新图标 | `artifacts/tests/shortcut-0.9-results.json` |
+| 静置性能 | 最终发布文件各测 60 秒；前台 11/11 样本聚焦、原生插入点有效 | [性能记录](performance.md) |
+
+原生 OLE 检查通过真实 COM `QueryGetData` / `GetData` 读取 `CF_HDROP`，确认内部排序不创建文件、首次外部请求只生成一次真实副本。Shell 组件测试验证可执行参数、工作目录和打包应用 PIDL 往返，不打开这些应用。自动化输入接口限制跨目标窗口拖动，因此 **Explorer / Windows 桌面完整鼠标往返仍列为手工验收项**，不把组件通过写成已经完成的桌面端到端测试。
+
+鼠标排序采用隔离的真实 Dock 实例，只为自动化枚举调整该测试窗口的工具窗与激活标志；正式 Dock 保留原有原生窗口标志。字体通知测试在本地服务实例投递，不修改 Windows 字体、启动项或桌面图标显示。
+
+光标专项在自己的测试窗口内短暂启用输入，验证聚焦后的根时钟停止、文字编辑和选区、字体和主题切换、控件移除清理；`GetGUIThreadInfo` 仍取得原生插入点 HWND 与非空矩形，系统闪烁间隔前后相同。没有改写系统设置或自动化其他程序；中文 IME 组合输入和屏幕阅读器仍需专项手工验证。
+
+生命周期轮用时 32.829 秒，关闭动画；回收后的保留托管堆由 6,394,280 变为 4,546,368 字节。它不能证明长期无泄漏或持续输入的帧率。滚动条与光标收尾后，35 项设置回归已重新通过。
+
+展示图使用本版真实 WPF 界面、系统应用图标、隔离配置与原创静态示例背景，不含个人桌面内容。资源实测见 [性能记录](performance.md)，历史报告按各自版本解释。
+
+## 0.8.0 历史记录
 
 Windows 11 x64 build 26300，16 个逻辑处理器，单屏 2560×1440。以下结果来自本版实际 Windows 构建与运行。
 

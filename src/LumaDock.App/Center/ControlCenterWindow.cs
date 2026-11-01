@@ -95,7 +95,9 @@ public sealed class ControlCenterWindow : Window
         WindowStartupLocation = WindowStartupLocation.CenterScreen;
         WindowStyle = WindowStyle.None;
         ResizeMode = ResizeMode.CanResize;
-        FontFamily = new FontFamily("Segoe UI Variable Text, Microsoft YaHei UI");
+        SetResourceReference(FontFamilyProperty, "UiTextFamily");
+        SetResourceReference(FontWeightProperty, "UiTextWeight");
+        SetResourceReference(FontStyleProperty, "UiTextStyle");
         FontSize = 13;
         UseLayoutRounding = true;
         SnapsToDevicePixels = true;
@@ -223,7 +225,8 @@ public sealed class ControlCenterWindow : Window
         _categories = new() { Margin = new Thickness(0, 0, 0, 18) };
         var heading = new Grid { Margin = new Thickness(0, 0, 0, 23) };
         heading.ColumnDefinitions.Add(new ColumnDefinition()); heading.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        var words = new StackPanel(); _title.FontSize = 28; _title.FontWeight = FontWeights.SemiBold; _title.FontFamily = new FontFamily("Segoe UI Variable Display, Microsoft YaHei UI");
+        var words = new StackPanel(); _title.FontSize = 28; _title.SetResourceReference(TextBlock.FontWeightProperty, "UiEmphasisWeight"); _title.SetResourceReference(TextBlock.FontFamilyProperty, "UiTextFamily");
+        _title.Tag = "PageHeading";
         _subtitle.SetResourceReference(TextBlock.ForegroundProperty, "MutedBrush"); _subtitle.FontSize = 12;
         words.Children.Add(_title); words.Children.Add(_subtitle); heading.Children.Add(words);
         var toolRail = new Border { CornerRadius = new CornerRadius(10, 19, 10, 19), Padding = new Thickness(3), Margin = new Thickness(18, 0, 0, 0), BorderThickness = new Thickness(.6), VerticalAlignment = VerticalAlignment.Center, Child = _tools };
@@ -266,10 +269,10 @@ public sealed class ControlCenterWindow : Window
         icon.SetResourceReference(TextBlock.ForegroundProperty, selected ? "AccentBrush" : "MutedBrush");
         var badge = new Border { Width = 28, Height = 28, CornerRadius = new CornerRadius(8, 12, 8, 12), HorizontalAlignment = HorizontalAlignment.Left, Child = icon };
         badge.SetResourceReference(Border.BackgroundProperty, selected ? "AccentSoftBrush" : "CardBrush"); Grid.SetColumn(badge, 1); content.Children.Add(badge);
-        var name = Text(label, 13, selected ? FontWeights.SemiBold : FontWeights.Normal); name.VerticalAlignment = VerticalAlignment.Center; Grid.SetColumn(name, 2); content.Children.Add(name); button.Content = content;
+        var name = Text(label, 13, selected ? FontWeights.SemiBold : FontWeights.Normal); name.Tag = "NavigationLabel"; name.VerticalAlignment = VerticalAlignment.Center; Grid.SetColumn(name, 2); content.Children.Add(name); button.Content = content;
         System.Windows.Automation.AutomationProperties.SetName(button, label);
         button.HorizontalContentAlignment = HorizontalAlignment.Left; button.Padding = new Thickness(9, 9, 10, 9); button.Margin = new Thickness(0, 0, 0, 8); button.Background = Brushes.Transparent; button.BorderBrush = Brushes.Transparent;
-        ApplyButtonTemplate(button, new CornerRadius(13, 23, 23, 13));
+        ApplyButtonTemplate(button, new CornerRadius(11, 20, 20, 11), navigation: true);
         if (selected) { button.SetResourceReference(BackgroundProperty, "SelectionBrush"); button.SetResourceReference(BorderBrushProperty, "GlassHighlightBrush"); }
         _sidebar.Children.Add(button);
     }
@@ -315,8 +318,8 @@ public sealed class ControlCenterWindow : Window
             if (category != "全部应用" && category != "Dock 已固定")
             {
                 chip.AllowDrop = true;
-                chip.DragOver += (_, e) => { e.Effects = e.Data.GetDataPresent(AppDragFormat) ? DragDropEffects.Move : DragDropEffects.None; e.Handled = true; };
-                chip.Drop += (_, e) => { if (GetDragged(e) is { } app) { app.Category = captured; _controller.Save(); RenderAppGrid(desktop); } e.Handled = true; };
+                chip.DragOver += (_, e) => { e.Effects = e.Data.GetDataPresent(AppDragFormat) ? LocalDragEffect(e) : DragDropEffects.None; e.Handled = true; };
+                chip.Drop += (_, e) => { if (GetDragged(e) is { } app) { Catalog.AssignCategory(app, captured); _controller.Save(); RenderAppGrid(desktop); } e.Handled = true; };
             }
             _categories.Children.Add(chip);
         }
@@ -344,9 +347,9 @@ public sealed class ControlCenterWindow : Window
             if (button.Tag is not string category) continue;
             var selected = category == _category;
             button.SetResourceReference(BackgroundProperty, selected ? "SelectionBrush" : "CardBrush");
-            button.SetResourceReference(BorderBrushProperty, selected ? "AccentBrush" : "GlassHighlightBrush");
-            button.FontWeight = selected ? FontWeights.SemiBold : FontWeights.Normal;
-            if (button.Content is StackPanel labelStack && labelStack.Children.OfType<TextBlock>().FirstOrDefault() is { } label) label.FontWeight = button.FontWeight;
+            button.SetResourceReference(BorderBrushProperty, selected ? "AccentBrush" : "BorderBrush");
+            button.SetResourceReference(FontWeightProperty, selected ? "UiEmphasisWeight" : "UiTextWeight");
+            if (button.Content is StackPanel labelStack && labelStack.Children.OfType<TextBlock>().FirstOrDefault() is { } label) label.SetResourceReference(TextBlock.FontWeightProperty, selected ? "UiEmphasisWeight" : "UiTextWeight");
             var count = category == "全部应用" ? source.Length : category == "Dock 已固定" ? source.Count(app => pins.Contains(app.Id)) : categories.GetValueOrDefault(category);
             if (_categoryCounts.TryGetValue(category, out var countText)) { countText.Text = count.ToString(); countText.SetResourceReference(TextBlock.ForegroundProperty, selected ? "TextBrush" : "CaptionBrush"); }
             System.Windows.Automation.AutomationProperties.SetHelpText(button, $"{count} 个{(_section == "Desktop" ? "快捷方式" : "应用")}");
@@ -425,6 +428,7 @@ public sealed class ControlCenterWindow : Window
         name.SetResourceReference(TextBlock.FontFamilyProperty, "AppNameFamily"); name.SetResourceReference(TextBlock.FontSizeProperty, "AppNameSize");
         name.SetResourceReference(TextBlock.FontWeightProperty, "AppNameWeight"); name.SetResourceReference(TextBlock.FontStyleProperty, "AppNameStyle");
         name.SetResourceReference(TextBlock.TextDecorationsProperty, "AppNameDecorations");
+        name.SetResourceReference(TextBlock.ForegroundProperty, "AppNameBrush");
         name.TextAlignment = TextAlignment.Center; name.TextWrapping = TextWrapping.Wrap; name.TextTrimming = TextTrimming.CharacterEllipsis;
         name.LineHeight = metrics.LineHeight; name.LineStackingStrategy = LineStackingStrategy.BlockLineHeight;
         name.Height = metrics.NameHeight; name.MaxHeight = metrics.NameHeight; name.Margin = new Thickness(0, 10, 0, 0); content.Children.Add(name);
@@ -443,14 +447,14 @@ public sealed class ControlCenterWindow : Window
         {
             var point = e.GetPosition(tile);
             if (e.LeftButton == MouseButtonState.Pressed && ((point - _dragStart).Length > 7))
-            { DragDrop.DoDragDrop(tile, new DataObject(AppDragFormat, app.Id), DragDropEffects.Move); e.Handled = true; }
+            { DragDrop.DoDragDrop(tile, new DataObject(AppDragFormat, app.Id), DragDropEffects.Move | DragDropEffects.Copy | DragDropEffects.Link); e.Handled = true; }
         };
-        tile.AllowDrop = true; tile.DragOver += (_, e) => { e.Effects = e.Data.GetDataPresent(AppDragFormat) ? DragDropEffects.Move : DragDropEffects.None; e.Handled = true; };
+        tile.AllowDrop = true; tile.DragOver += (_, e) => { e.Effects = e.Data.GetDataPresent(AppDragFormat) ? LocalDragEffect(e) : DragDropEffects.None; e.Handled = true; };
         tile.Drop += (_, e) =>
         {
             if (GetDragged(e) is { } moved && moved.Id != app.Id)
             {
-                var list = _controller.State.Apps; list.Remove(moved); moved.Category = app.Category; list.Insert(Math.Max(0, list.IndexOf(app)), moved); _controller.Save(); RenderAppGrid(desktop);
+                var list = _controller.State.Apps; list.Remove(moved); Catalog.AssignCategory(moved, app.Category); list.Insert(Math.Max(0, list.IndexOf(app)), moved); _controller.Save(); RenderAppGrid(desktop);
             }
             e.Handled = true;
         };
@@ -460,7 +464,7 @@ public sealed class ControlCenterWindow : Window
         var pinned = _controller.State.PinnedIds.Contains(app.Id);
         menu.Items.Add(Menu(pinned ? "从 Dock 移除" : "固定到 Dock", () => { if (pinned) _controller.Unpin(app); else _controller.Pin(app); }));
         var groups = new MenuItem { Header = "移到分组" };
-        foreach (var category in _controller.State.Categories) { var captured = category; groups.Items.Add(Menu(category, () => { app.Category = captured; _controller.Save(); RenderAppGrid(desktop); })); }
+        foreach (var category in _controller.State.Categories) { var captured = category; groups.Items.Add(Menu(category, () => { Catalog.AssignCategory(app, captured); _controller.Save(); RenderAppGrid(desktop); })); }
         menu.Items.Add(groups);
         menu.Items.Add(Menu("更换图标…", () => _controller.ChooseIcon(app, this)));
         var restoreIcon = Menu("恢复原图标", () => _controller.SetCustomIcon(app, "")); restoreIcon.IsEnabled = !string.IsNullOrEmpty(app.CustomIconPath); menu.Items.Add(restoreIcon);
@@ -474,6 +478,7 @@ public sealed class ControlCenterWindow : Window
     }
 
     private AppEntry? GetDragged(System.Windows.DragEventArgs e) => e.Data.GetDataPresent(AppDragFormat) ? _controller.State.Apps.FirstOrDefault(a => a.Id == (string?)e.Data.GetData(AppDragFormat)) : null;
+    private static DragDropEffects LocalDragEffect(System.Windows.DragEventArgs e) => (e.AllowedEffects & DragDropEffects.Move) != 0 ? DragDropEffects.Move : e.AllowedEffects & DragDropEffects.Copy;
 
     private void AddApplication()
     {
@@ -508,6 +513,7 @@ public sealed class ControlCenterWindow : Window
         _fontPreview = null; _fontPreviewInfo = null;
         var previousOffset = _settingsScrollOffset;
         var stack = new StackPanel(); var scroll = new ScrollViewer { Content = stack, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled }; Grid.SetRow(scroll, 2); _body.Children.Add(scroll);
+        scroll.Resources[typeof(ScrollBar)] = CenterStyles.ScrollBarStyle();
         _settingsRoot = stack; _settingsGroup = null;
         scroll.Loaded += (_, _) => scroll.ScrollToVerticalOffset(previousOffset);
         scroll.ScrollChanged += (_, e) => _settingsScrollOffset = e.VerticalOffset;
@@ -537,15 +543,16 @@ public sealed class ControlCenterWindow : Window
         SelectRow(stack, "显示器", "断开后使用主显示器", monitors.ToArray(), settings.MonitorDevice, value => settings.MonitorDevice = value);
         ToggleRow(stack, "自动隐藏", "鼠标靠近 Dock 边缘时重新显示", settings.AutoHide, value => settings.AutoHide = value);
         SliderRow(stack, "悬停放大强度", 0, 1, settings.AnimationStrength, value => settings.AnimationStrength = value, value => $"{value:P0}");
-        var fontHeading = Section(stack, "名称字体", "只调整 LumaDock 中的应用名称，Windows 字体保持原样。");
-        ToggleRow(stack, "跟随 Windows 图标字体", "使用 Windows 当前的图标名称样式", settings.FollowSystemIconFont, value => { settings.FollowSystemIconFont = value; Dispatcher.BeginInvoke(() => Render()); });
+        var fontHeading = Section(stack, "字体与文字", "侧栏、分类与应用名称一起调整，仅对 LumaDock 生效。");
+        ToggleRow(stack, "跟随 Windows 图标字体", "读取系统的字体与粗细；名称字号随系统变化", settings.FollowSystemIconFont, value => { settings.FollowSystemIconFont = value; Dispatcher.BeginInvoke(() => Render()); });
         if (!settings.FollowSystemIconFont)
         {
             NameFontFamilyRow(stack);
             SliderRow(stack, "名称字号", 10, 40, settings.NameFontSize, value => { settings.NameFontSize = value; UpdateNameFontPreview(); }, value => $"{value * .75:0.#} 磅");
-            ToggleRow(stack, "加粗", "", settings.NameFontBold, value => { settings.NameFontBold = value; UpdateNameFontPreview(); });
+            ToggleRow(stack, "加粗", "同时用于侧栏、分类和应用名称", settings.NameFontBold, value => { settings.NameFontBold = value; UpdateNameFontPreview(); });
             ToggleRow(stack, "斜体", "", settings.NameFontItalic, value => { settings.NameFontItalic = value; UpdateNameFontPreview(); });
         }
+        TextColorRow(stack);
         BuildNameFontPreview(stack);
         var systemFont = _controller.SystemIconFont;
         ActionRow(stack, "系统图标字体", $"{systemFont.FamilyName} · {systemFont.SizeDip * .75:0.##} 磅{(systemFont.Weight >= 600 ? " · 加粗" : "")}", "刷新字体", () => { _controller.RefreshSystemFont(); _status.Text = "已读取系统图标字体"; });
@@ -683,11 +690,49 @@ public sealed class ControlCenterWindow : Window
         Grid.SetColumn(combo, 1); row.Children.Add(combo);
     }
 
+    private void TextColorRow(StackPanel parent)
+    {
+        var settings = _controller.State.Settings;
+        var row = SettingRow(parent, "文字颜色", "自动配色随深浅主题切换");
+        var palette = new WrapPanel { HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Center, MaxWidth = 224 };
+        var choices = new[] { ("", "自动"), ("#F5F2EC", "白瓷"), ("#B8E2F5", "冰蓝"), ("#BCE8D4", "薄荷"), ("#F3D7A8", "砂金"), ("#263749", "墨色") };
+        void RefreshSelection()
+        {
+            foreach (var control in palette.Children.OfType<Button>())
+            {
+                var selected = Equals(control.Tag, "TextColor:" + settings.TextColor);
+                control.SetResourceReference(BorderBrushProperty, selected ? "AccentBrush" : "BorderBrush");
+                System.Windows.Automation.AutomationProperties.SetItemStatus(control, selected ? "已选择" : "");
+            }
+        }
+        foreach (var choice in choices)
+        {
+            var button = new Button { Tag = "TextColor:" + choice.Item1, Width = string.IsNullOrEmpty(choice.Item1) ? 49 : 28, Height = 30, Margin = new Thickness(0, 0, 5, 5), Padding = new Thickness(0), ToolTip = choice.Item2 };
+            if (string.IsNullOrEmpty(choice.Item1)) button.Content = Text("自动", 10);
+            else button.Content = new Border { Width = 13, Height = 13, CornerRadius = new CornerRadius(4, 7, 4, 7), Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString(choice.Item1)) };
+            button.SetResourceReference(BackgroundProperty, "CardBrush");
+            ApplyButtonTemplate(button, new CornerRadius(7, 12, 7, 12));
+            System.Windows.Automation.AutomationProperties.SetName(button, "文字颜色 · " + choice.Item2);
+            button.Click += (_, _) => { settings.TextColor = choice.Item1; SaveSettings(); UpdateNameFontPreview(); RefreshSelection(); };
+            palette.Children.Add(button);
+        }
+        RefreshSelection(); Grid.SetColumn(palette, 1); row.Children.Add(palette);
+        ActionRow(parent, "自定义文字颜色", string.IsNullOrEmpty(settings.TextColor) ? "跟随主题" : settings.TextColor, "自选颜色…", () =>
+        {
+            var value = AskText("文字颜色", "十六进制色值，例如 #D7ECF4；留空恢复自动", settings.TextColor);
+            if (value == null) return;
+            value = value.Trim().ToUpperInvariant();
+            if (value.Length != 0 && (value.Length != 7 || value[0] != '#' || !value.AsSpan(1).ToString().All(Uri.IsHexDigit)))
+            { _controller.Notify("请输入六位十六进制颜色，例如 #D7ECF4。"); return; }
+            settings.TextColor = value; SaveSettings(); Render();
+        });
+    }
+
     private void BuildNameFontPreview(StackPanel parent)
     {
         var card = new Border { CornerRadius = new CornerRadius(12, 21, 12, 21), BorderThickness = new Thickness(.8), Padding = new Thickness(18, 16, 18, 16), Margin = new Thickness(0, 13, 0, 9) };
         card.SetResourceReference(Border.BackgroundProperty, "PanelBrush"); card.SetResourceReference(Border.BorderBrushProperty, "GlassHighlightBrush");
-        var content = new StackPanel(); content.Children.Add(Text("名称预览", 11, FontWeights.Normal, true));
+        var content = new StackPanel(); content.Children.Add(Text("文字预览", 11, FontWeights.Normal, true));
         var examples = _controller.State.Apps.Where(app => !app.Hidden).Select(app => app.Name).Where(name => !string.IsNullOrWhiteSpace(name)).Distinct().Take(2).ToArray();
         _fontPreview = Text(examples.Length > 0 ? string.Join("    ", examples) : "我的应用    桌面快捷方式");
         _fontPreview.Tag = "NameFontPreview"; _fontPreview.TextWrapping = TextWrapping.Wrap; _fontPreview.Margin = new Thickness(0, 13, 0, 12);
@@ -703,6 +748,7 @@ public sealed class ControlCenterWindow : Window
         var font = _controller.NameFont;
         _fontPreview.FontFamily = new FontFamily(font.FamilyName); _fontPreview.FontSize = font.SizeDip;
         _fontPreview.FontWeight = FontWeight.FromOpenTypeWeight(font.Weight); _fontPreview.FontStyle = font.Italic ? FontStyles.Italic : FontStyles.Normal;
+        _fontPreview.SetResourceReference(TextBlock.ForegroundProperty, "AppNameBrush");
         var decorations = new TextDecorationCollection();
         if (font.Underline) decorations.Add(TextDecorations.Underline[0]);
         if (font.Strikeout) decorations.Add(TextDecorations.Strikethrough[0]);
@@ -756,7 +802,7 @@ public sealed class ControlCenterWindow : Window
         parent.Children.Add(card); _settingsGroup = group;
         var heading = new StackPanel { Margin = new Thickness(0, 0, 0, 5) };
         var titleRow = new Grid(); titleRow.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(37) }); titleRow.ColumnDefinitions.Add(new ColumnDefinition());
-        var glyph = title switch { "材质与颜色" => "\uE790", "Dock" => "\uE739", "名称字体" => "\uE8D2", "应用整理" => "\uE71D", "性能与启动" => "\uE7E8", _ => "\uE8A5" };
+        var glyph = title switch { "材质与颜色" => "\uE790", "Dock" => "\uE739", "字体与文字" => "\uE8D2", "应用整理" => "\uE71D", "性能与启动" => "\uE7E8", _ => "\uE8A5" };
         var mark = Glyph(glyph, 13); mark.HorizontalAlignment = HorizontalAlignment.Center; mark.SetResourceReference(TextBlock.ForegroundProperty, "AccentBrush");
         var badge = new Border { Width = 27, Height = 27, CornerRadius = new CornerRadius(7, 11, 7, 11), HorizontalAlignment = HorizontalAlignment.Left, Child = mark };
         badge.SetResourceReference(Border.BackgroundProperty, "AccentSoftBrush"); titleRow.Children.Add(badge);
@@ -825,7 +871,10 @@ public sealed class ControlCenterWindow : Window
 
     private TextBlock Text(string text, double size = 13, FontWeight? weight = null, bool muted = false)
     {
-        var block = new TextBlock { Text = text, FontSize = size, FontWeight = weight ?? FontWeights.Normal };
+        var block = new TextBlock { Text = text, FontSize = size };
+        block.SetResourceReference(TextBlock.FontFamilyProperty, "UiTextFamily");
+        block.SetResourceReference(TextBlock.FontWeightProperty, (weight ?? FontWeights.Normal).ToOpenTypeWeight() >= 500 ? "UiEmphasisWeight" : "UiTextWeight");
+        block.SetResourceReference(TextBlock.FontStyleProperty, "UiTextStyle");
         block.SetResourceReference(TextBlock.ForegroundProperty, muted ? "MutedBrush" : "TextBrush"); return block;
     }
 
@@ -840,11 +889,11 @@ public sealed class ControlCenterWindow : Window
     private static void ApplyButtonTemplate(Button button, double radius, bool tile = false, bool accent = false)
         => ApplyButtonTemplate(button, new CornerRadius(radius), tile, accent);
 
-    private static void ApplyButtonTemplate(Button button, CornerRadius radius, bool tile = false, bool accent = false)
+    private static void ApplyButtonTemplate(Button button, CornerRadius radius, bool tile = false, bool accent = false, bool navigation = false)
     {
         var border = new FrameworkElementFactory(typeof(Border), "Surface"); border.SetValue(Border.CornerRadiusProperty, radius); border.SetBinding(Border.BackgroundProperty, new Binding(nameof(Button.Background)) { RelativeSource = RelativeSource.TemplatedParent }); border.SetBinding(Border.PaddingProperty, new Binding(nameof(Button.Padding)) { RelativeSource = RelativeSource.TemplatedParent });
         border.SetValue(Border.BorderThicknessProperty, new Thickness(.8));
-        if (tile) button.BorderBrush = Brushes.Transparent; else button.SetResourceReference(Control.BorderBrushProperty, "GlassHighlightBrush");
+        if (tile || navigation) button.BorderBrush = Brushes.Transparent; else button.SetResourceReference(Control.BorderBrushProperty, "GlassHighlightBrush");
         border.SetBinding(Border.BorderBrushProperty, new Binding(nameof(Button.BorderBrush)) { RelativeSource = RelativeSource.TemplatedParent });
         var presenter = new FrameworkElementFactory(typeof(ContentPresenter)); presenter.SetBinding(ContentPresenter.HorizontalAlignmentProperty, new Binding(nameof(Button.HorizontalContentAlignment)) { RelativeSource = RelativeSource.TemplatedParent }); presenter.SetValue(ContentPresenter.VerticalAlignmentProperty, VerticalAlignment.Center); border.AppendChild(presenter);
         var template = new ControlTemplate(typeof(Button)) { VisualTree = border };
@@ -859,7 +908,7 @@ public sealed class ControlCenterWindow : Window
 
     private Button ChromeButton(string label, string tooltip, Action action)
     { var button = ActionButton("", action); button.Content = Glyph(label, 12); button.Width = 34; button.Height = 30; button.Padding = new Thickness(0); button.Background = Brushes.Transparent; button.ToolTip = tooltip; System.Windows.Automation.AutomationProperties.SetName(button, tooltip); ApplyButtonTemplate(button, 10, tile: true); return button; }
-    private TextBlock Glyph(string value, double size) => new() { Text = value, FontFamily = new FontFamily("Segoe Fluent Icons, Segoe MDL2 Assets"), FontSize = size, VerticalAlignment = VerticalAlignment.Center };
+    private TextBlock Glyph(string value, double size) => new() { Text = value, FontFamily = new FontFamily("Segoe Fluent Icons, Segoe MDL2 Assets"), FontSize = size, FontWeight = FontWeights.Normal, FontStyle = FontStyles.Normal, VerticalAlignment = VerticalAlignment.Center };
     private static MenuItem Menu(string label, Action action) { var item = new MenuItem { Header = label }; item.Click += (_, _) => action(); return item; }
     private void Safe(Action action) { try { action(); } catch (Exception ex) { ShowError(ex); } }
     private void ShowError(Exception ex) { Debug.WriteLine(ex); _controller.Notify(ex.Message); }

@@ -41,7 +41,7 @@ internal static class Program
                 controller.State.Settings.LiquidGlass = false;
                 controller.State.Settings.IconSize = 48;
                 controller.State.Settings.AnimationStrength = .45;
-                controller.State.Apps = Enumerable.Range(1, 7).Select(i => new AppEntry { Id = "fixture" + i, Name = "Dock test " + i, LaunchPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "explorer.exe"), ExecutablePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "explorer.exe") }).ToList();
+                controller.State.Apps = Enumerable.Range(1, 7).Select(i => new AppEntry { Id = "fixture" + i, Name = "Dock test " + i, LaunchPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "explorer.exe"), ExecutablePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "explorer.exe"), Arguments = "--fixture " + i }).ToList();
                 controller.State.PinnedIds = controller.State.Apps.Select(x => x.Id).ToList();
                 dock = new DockWindow(controller) { ShowActivated = false };
                 dock.SourceInitialized += (_, _) => EnableWindow(new WindowInteropHelper(dock).Handle, false);
@@ -61,6 +61,77 @@ internal static class Program
                     Require(buttons.Select(System.Windows.Automation.AutomationProperties.GetName).SequenceEqual(new[] { "应用库" }.Concat(controller.State.Apps.Select(a => a.Name))), "Dock accessibility names do not match records.");
                 });
                 Check("Dock hover is dormant at rest", () => Require(!Field<DispatcherTimer>(dock, "hover").IsEnabled, "Hover timer is running without input."));
+                Check("Drag identity and native format queries start without creating a transfer file", () =>
+                {
+                    var created = 0;
+                    var shortcut = Path.Combine(profile, "delayed-transfer.url");
+                    var transfer = new DockTransferData("fixture1", () => { created++; File.WriteAllText(shortcut, "[InternetShortcut]\r\nURL=https://example.invalid/fixture\r\n"); return [shortcut]; }, error => throw error);
+                    var wrapped = new DataObject(transfer);
+                    Require((string?)wrapped.GetData("LumaDock.Pin") == "fixture1" && wrapped.GetFormats().Contains(DataFormats.FileDrop) && created == 0 && !File.Exists(shortcut), "Drag startup eagerly performed file I/O.");
+                    var native = (System.Runtime.InteropServices.ComTypes.IDataObject)wrapped;
+                    var format = new System.Runtime.InteropServices.ComTypes.FORMATETC { cfFormat = (short)DataFormats.GetDataFormat(DataFormats.FileDrop).Id,
+                        dwAspect = System.Runtime.InteropServices.ComTypes.DVASPECT.DVASPECT_CONTENT, lindex = -1, tymed = System.Runtime.InteropServices.ComTypes.TYMED.TYMED_HGLOBAL };
+                    Require(native.QueryGetData(ref format) == 0 && created == 0, "Native format probing created a file before it was requested.");
+                    native.GetData(ref format, out var medium);
+                    try
+                    {
+                        var path = new System.Text.StringBuilder(4096);
+                        Require(DragQueryFile(medium.unionmember, uint.MaxValue, null, 0) == 1, "Shell did not receive one real CF_HDROP file.");
+                        DragQueryFile(medium.unionmember, 0, path, (uint)path.Capacity);
+                        Require(path.ToString() == shortcut && File.Exists(shortcut) && created == 1, "Delayed Shell transfer did not materialize exactly once.");
+                        var retrieved = wrapped.GetData(DataFormats.FileDrop) as string[] ?? throw new InvalidOperationException("Shell file data was missing.");
+                        Require(retrieved.Length == 1 && retrieved[0] == shortcut && created == 1, "Repeated retrieval recreated a transfer file.");
+                    }
+                    finally { ReleaseStgMedium(ref medium); }
+                });
+                Check("A failed Shell export keeps internal reordering available and reports failure once", () =>
+                {
+                    var attempts = 0; var failures = 0;
+                    var transfer = new DockTransferData("fixture1", () => { attempts++; throw new IOException("Fixture failure"); }, _ => failures++);
+                    var wrapped = new DataObject(transfer);
+                    var first = wrapped.GetData(DataFormats.FileDrop) as string[] ?? throw new InvalidOperationException("Failed export omitted its empty file result.");
+                    var second = wrapped.GetData(DataFormats.FileDrop) as string[] ?? throw new InvalidOperationException("Repeated export omitted its empty file result.");
+                    Require(first.Length == 0 && second.Length == 0, "Failed export returned nonexistent files.");
+                    Require(attempts == 1 && failures == 1 && !wrapped.GetDataPresent(DataFormats.FileDrop) && (string?)wrapped.GetData("LumaDock.Pin") == "fixture1", "Export failure disabled internal identity or repeatedly performed work.");
+                });
+                Check("Insertion gaps preserve exact before/after order without duplicate pins", () =>
+                {
+                    var pins = new List<string> { "a", "b", "c", "d" };
+                    DockOrder.InsertAtGap(pins, ["a"], 3); Require(pins.SequenceEqual(new[] { "b", "c", "a", "d" }), "Forward insertion chose the wrong side.");
+                    DockOrder.InsertAtGap(pins, ["d"], 1); Require(pins.SequenceEqual(new[] { "b", "d", "c", "a" }), "Backward insertion chose the wrong side.");
+                    DockOrder.InsertAtGap(pins, ["x", "y", "x"], 2); Require(pins.SequenceEqual(new[] { "b", "d", "x", "y", "c", "a" }), "Batch drop did not keep incoming order.");
+                    DockOrder.InsertAtGap(pins, ["c"], pins.Count); Require(pins[^1] == "c" && pins.Count == pins.Distinct().Count(), "An end drop duplicated a pin.");
+                });
+                var originalPins = controller.State.PinnedIds.ToArray();
+                foreach (var position in new[] { "Bottom", "Top", "Left", "Right" })
+                {
+                    controller.State.Settings.Position = position; dock.UpdateSettings(); await Frame();
+                    Check($"{position} Dock maps every visual half-cell to its exact insertion gap", () =>
+                    {
+                        var appTiles = Tiles(dock).Skip(1).ToArray();
+                        for (var i = 0; i < appTiles.Length; i++)
+                        {
+                            var button = Field<Button>(appTiles[i], "Button");
+                            var center = button.TranslatePoint(new Point(button.ActualWidth / 2, button.ActualHeight / 2), dock);
+                            var before = position is "Left" or "Right" ? new Point(center.X, center.Y - 1) : new Point(center.X - 1, center.Y);
+                            var after = position is "Left" or "Right" ? new Point(center.X, center.Y + 1) : new Point(center.X + 1, center.Y);
+                            Require(Invoke<int>(dock, "InsertionGap", before) == i && Invoke<int>(dock, "InsertionGap", after) == i + 1, "A cell half maps to the wrong insertion slot.");
+                            Call(dock, "ShowInsertionAt", i);
+                            Require(Field<Border>(dock, "insertionCue").Visibility == Visibility.Visible, "Insertion position has no visible cue.");
+                        }
+                        Call(dock, "ClearInsertion");
+                        Require(Field<Border>(dock, "insertionCue").Visibility == Visibility.Collapsed && !Field<DispatcherTimer>(dock, "hover").IsEnabled, "Drag feedback retained a cue or animation after cancellation.");
+                    });
+                }
+                Check("Pinning between two icons saves the exact order and preserves the original application", () =>
+                {
+                    var moving = controller.State.Apps[0]; var path = moving.LaunchPath;
+                    controller.PinAt(moving, 3);
+                    Require(controller.State.PinnedIds.SequenceEqual(originalPins.Skip(1).Take(2).Concat([originalPins[0]]).Concat(originalPins.Skip(3))), "Controller inserted at the wrong gap.");
+                    var loaded = new StateStore(profile).Load();
+                    Require(loaded.PinnedIds.SequenceEqual(controller.State.PinnedIds) && File.Exists(path), "Pin order was not persisted or a launch file changed.");
+                });
+                controller.State.PinnedIds = originalPins.ToList(); controller.State.Settings.Position = "Bottom"; dock.UpdateSettings(); await Frame();
                 Check("Icon centres hit their actual application buttons", () =>
                 {
                     foreach (var tile in Tiles(dock))
@@ -208,7 +279,11 @@ internal static class Program
                     CheckBounds(dock);
                 });
                 dock.Close(); await Frame();
-                Check("Closing the Dock detaches its motion clock", () => Require(!Field<DispatcherTimer>(dock, "hover").IsEnabled, "Closed Dock retains a clock."));
+                Check("Closing the Dock detaches its motion and auto-hide clocks", () =>
+                {
+                    Call(dock, "ScheduleHide");
+                    Require(!Field<DispatcherTimer>(dock, "hover").IsEnabled && !Field<DispatcherTimer>(dock, "hideDelay").IsEnabled, "A closed Dock retains a clock.");
+                });
                 exit = Errors.Count == 0 ? 0 : 1;
             }
             catch (Exception ex) { Errors.Add(ex.ToString()); }
@@ -233,6 +308,7 @@ internal static class Program
     private static object[] Tiles(DockWindow dock) => ((IEnumerable)Field<object>(dock, "tiles")).Cast<object>().ToArray();
     private static T Field<T>(object o, string name) => (T)o.GetType().GetField(name, Private | BindingFlags.Public)!.GetValue(o)!;
     private static void Call(object o, string name, params object?[] args) => o.GetType().GetMethod(name, Private)!.Invoke(o, args);
+    private static T Invoke<T>(object o, string name, params object?[] args) => (T)o.GetType().GetMethod(name, Private)!.Invoke(o, args)!;
     private static void MoveTo(DockWindow dock, object tile)
     {
         if (Field<AppController>(dock, "controller").ReducedMotion) return;
@@ -255,4 +331,6 @@ internal static class Program
     [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")] private static extern IntPtr GetWindowLongPtr(IntPtr hwnd, int index);
     [StructLayout(LayoutKind.Sequential)] private readonly record struct NativePoint(int X, int Y);
     [DllImport("user32.dll")] private static extern IntPtr WindowFromPoint(NativePoint point);
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode)] private static extern uint DragQueryFile(IntPtr drop, uint index, System.Text.StringBuilder? path, uint size);
+    [DllImport("ole32.dll")] private static extern void ReleaseStgMedium(ref System.Runtime.InteropServices.ComTypes.STGMEDIUM medium);
 }

@@ -46,9 +46,13 @@ internal static class Theme
         r["SelectionBrush"] = accentSoft;
         Brush("PopupBrush", light ? "#F2F8FBFF" : "#F2242F3C");
         Brush("OpaqueSurfaceBrush", light ? "#F1F5F9" : "#202A37");
+        Typography.RefreshPalette();
         if (r.Contains(typeof(Button))) return;
         var button = new Style(typeof(Button));
         button.Setters.Add(new Setter(Control.ForegroundProperty, new DynamicResourceExtension("TextBrush")));
+        button.Setters.Add(new Setter(Control.FontFamilyProperty, new DynamicResourceExtension("UiTextFamily")));
+        button.Setters.Add(new Setter(Control.FontWeightProperty, new DynamicResourceExtension("UiTextWeight")));
+        button.Setters.Add(new Setter(Control.FontStyleProperty, new DynamicResourceExtension("UiTextStyle")));
         button.Setters.Add(new Setter(Control.BackgroundProperty, Brushes.Transparent));
         button.Setters.Add(new Setter(Control.BorderThicknessProperty, new Thickness(0)));
         button.Setters.Add(new Setter(Control.PaddingProperty, new Thickness(12, 8, 12, 8)));
@@ -70,7 +74,7 @@ internal static class Theme
         tooltip.Setters.Add(new Setter(Control.FontSizeProperty, new DynamicResourceExtension("AppNameSize")));
         tooltip.Setters.Add(new Setter(Control.FontWeightProperty, new DynamicResourceExtension("AppNameWeight")));
         tooltip.Setters.Add(new Setter(Control.FontStyleProperty, new DynamicResourceExtension("AppNameStyle")));
-        tooltip.Setters.Add(new Setter(Control.ForegroundProperty, new DynamicResourceExtension("TextBrush")));
+        tooltip.Setters.Add(new Setter(Control.ForegroundProperty, new DynamicResourceExtension("AppNameBrush")));
         tooltip.Setters.Add(new Setter(Control.BackgroundProperty, new DynamicResourceExtension("PopupBrush")));
         tooltip.Setters.Add(new Setter(Control.BorderBrushProperty, new DynamicResourceExtension("GlassHighlightBrush")));
         tooltip.Setters.Add(new Setter(Control.PaddingProperty, new Thickness(11, 7, 11, 7)));
@@ -87,6 +91,10 @@ internal static class Theme
         menu.Setters.Add(new Setter(Control.BorderBrushProperty, new DynamicResourceExtension("BorderBrush")));
         menu.Setters.Add(new Setter(Control.BorderThicknessProperty, new Thickness(1)));
         menu.Setters.Add(new Setter(Control.PaddingProperty, new Thickness(5)));
-        menu.Setters.Add(new Setter(Control.FontSizeProperty, 12d)); r[typeof(ContextMenu)] = menu;
+        menu.Setters.Add(new Setter(Control.FontSizeProperty, 12d));
+        menu.Setters.Add(new Setter(Control.FontFamilyProperty, new DynamicResourceExtension("UiTextFamily")));
+        menu.Setters.Add(new Setter(Control.FontWeightProperty, new DynamicResourceExtension("UiTextWeight")));
+        menu.Setters.Add(new Setter(Control.FontStyleProperty, new DynamicResourceExtension("UiTextStyle")));
+        r[typeof(ContextMenu)] = menu;
     }
 }

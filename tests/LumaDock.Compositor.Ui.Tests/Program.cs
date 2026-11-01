@@ -116,11 +116,23 @@ internal static class Program
                 });
                 center.Hide(); await Frame();
                 Check("Hiding the main window releases all snapshot work", () => NoSnapshotWork(surface));
-                center.Show(); await Frame();
-                Check("Showing an inactive main window does not freeze an old frame", () =>
+                // Maximizing/restoring earlier in this test may change activation even
+                // with ShowActivated=false. Establish an explicit, own-process focus
+                // anchor before testing a non-activating show; never activate user apps.
+                var focusAnchor = new Window { Title = "LumaDock composition focus fixture", Width = 48, Height = 48,
+                    Left = SystemParameters.WorkArea.Right - 60, Top = SystemParameters.WorkArea.Top + 12,
+                    ShowInTaskbar = false, WindowStyle = WindowStyle.ToolWindow };
+                try
                 {
-                    Require(!center.IsActive, "Focus-safety main window unexpectedly became active."); NoSnapshotWork(surface);
-                });
+                    focusAnchor.Show(); focusAnchor.Activate(); await Frame();
+                    Require(focusAnchor.IsActive, "Own-process focus fixture did not become active.");
+                    center.Show(); await Frame();
+                    Check("Showing an inactive main window does not freeze an old frame", () =>
+                    {
+                        Require(!center.IsActive && focusAnchor.IsActive, "Non-activating show changed fixture focus."); NoSnapshotWork(surface);
+                    });
+                }
+                finally { focusAnchor.Close(); }
                 controller.State.Settings.LiveGlassStyle = "Frosted"; controller.ApplySettings(); await Frame();
                 Check("Frosted composition is distinct from clear composition and retains no captured frame", () =>
                 {

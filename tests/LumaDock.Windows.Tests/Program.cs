@@ -1,12 +1,13 @@
 using System.Diagnostics;
 using System.IO;
+using System.Security.Cryptography;
 using System.Text.Json;
 using LumaDock.Core;
 using LumaDock.Windows;
 
 namespace LumaDock.Windows.Tests;
 
-/// <summary>Read-only integration checks against this interactive Windows session. No app activation.</summary>
+/// <summary>Read-only Shell checks and shortcut roundtrips in a private fixture directory. No app activation.</summary>
 internal static class Program
 {
     [STAThread]
@@ -53,6 +54,64 @@ internal static class Program
             Require(desktop.All(a => new[] { ".lnk", ".url", ".exe" }.Contains(Path.GetExtension(a.LaunchPath), StringComparer.OrdinalIgnoreCase)));
             observations["desktopRecordCount"] = desktop.Count;
         });
+
+        var transferFixture = Path.GetFullPath(Path.Combine("work", "dock-transfer-tests", Guid.NewGuid().ToString("N")));
+        Directory.CreateDirectory(transferFixture);
+        var transferExecutable = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "explorer.exe");
+        var transferApp = new AppEntry { Name = "Transfer fixture", LaunchPath = transferExecutable, ExecutablePath = transferExecutable,
+            Arguments = "--fixture \"profile with spaces\"", WorkingDirectory = transferFixture };
+        string originalTransfer = "";
+        Check("New desktop shortcut preserves executable arguments and working directory", () =>
+        {
+            originalTransfer = DesktopShortcutService.WriteShortcut(transferApp, transferFixture);
+            var resolved = AppDiscovery.FromPath(originalTransfer);
+            Require(resolved.ExecutablePath.Equals(transferExecutable, StringComparison.OrdinalIgnoreCase));
+            Require(resolved.Arguments == transferApp.Arguments && resolved.WorkingDirectory.Equals(transferFixture, StringComparison.OrdinalIgnoreCase));
+        });
+        Check("Repeated exports reserve distinct names without overwriting an existing shortcut", () =>
+        {
+            Require(File.Exists(originalTransfer)); var before = SHA256.HashData(File.ReadAllBytes(originalTransfer));
+            var second = DesktopShortcutService.WriteShortcut(transferApp, transferFixture);
+            Require(!second.Equals(originalTransfer, StringComparison.OrdinalIgnoreCase));
+            Require(before.SequenceEqual(SHA256.HashData(File.ReadAllBytes(originalTransfer))));
+        });
+        Check("Exporting a shortcut copies its exact bytes and leaves its original untouched", () =>
+        {
+            var before = SHA256.HashData(File.ReadAllBytes(originalTransfer));
+            var copy = DesktopShortcutService.WriteShortcut(new AppEntry { Name = "Copied fixture", LaunchPath = originalTransfer }, transferFixture);
+            Require(copy != originalTransfer && before.SequenceEqual(SHA256.HashData(File.ReadAllBytes(copy))));
+            Require(before.SequenceEqual(SHA256.HashData(File.ReadAllBytes(originalTransfer))));
+        });
+        Check("Internet shortcut export keeps the original URL file and its extension", () =>
+        {
+            var original = Path.Combine(transferFixture, "original.url");
+            File.WriteAllText(original, "[InternetShortcut]\r\nURL=https://example.invalid/fixture\r\n");
+            var bytes = File.ReadAllBytes(original);
+            var copy = DesktopShortcutService.WriteShortcut(new AppEntry { Name = "URL fixture", LaunchPath = original }, transferFixture);
+            Require(Path.GetExtension(copy) == ".url" && bytes.SequenceEqual(File.ReadAllBytes(copy)) && bytes.SequenceEqual(File.ReadAllBytes(original)));
+        });
+        Check("Shortcut display names cannot escape the selected destination directory", () =>
+        {
+            var path = DesktopShortcutService.WriteShortcut(new AppEntry { Name = "../../\\CON:\t?*", LaunchPath = transferExecutable }, transferFixture);
+            Require(Path.GetDirectoryName(path) == transferFixture && File.Exists(path));
+        });
+        Check("An unavailable launch target fails without leaving an empty shortcut", () =>
+        {
+            var count = Directory.GetFiles(transferFixture).Length; var failed = false;
+            try { DesktopShortcutService.WriteShortcut(new AppEntry { Name = "Missing fixture", LaunchPath = Path.Combine(transferFixture, "missing.exe") }, transferFixture); }
+            catch (FileNotFoundException) { failed = true; }
+            Require(failed && count == Directory.GetFiles(transferFixture).Length);
+        });
+        var packagedExport = apps.FirstOrDefault(app => app.AppUserModelId.Contains('!'));
+        observations["packagedShortcutExportAvailable"] = packagedExport != null;
+        if (packagedExport != null)
+            Check("Packaged application shortcut keeps a real Shell namespace identity on reimport", () =>
+            {
+                var exported = DesktopShortcutService.WriteShortcut(new AppEntry { Name = "Packaged fixture", AppUserModelId = packagedExport.AppUserModelId,
+                    LaunchPath = "shell:AppsFolder\\" + packagedExport.AppUserModelId }, transferFixture);
+                var resolved = AppDiscovery.FromPath(exported);
+                Require(resolved.AppUserModelId == packagedExport.AppUserModelId && File.Exists(exported));
+            });
 
         Check("Native Shell icon sample loads asynchronously and produces frozen real bitmaps", () =>
         {
@@ -118,7 +177,8 @@ internal static class Program
             schemaVersion = 1,
             recordedAtUtc = DateTimeOffset.UtcNow,
             platform = "Windows x64 interactive session",
-            readOnlyChecks = true,
+            readOnlySystemChecks = true,
+            shortcutChecksUsePrivateFixtureDirectory = true,
             elapsedMs = total.Elapsed.TotalMilliseconds,
             passed = results.Count - failed,
             failed,

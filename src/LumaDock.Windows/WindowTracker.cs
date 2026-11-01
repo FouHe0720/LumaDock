@@ -18,7 +18,7 @@ public sealed class WindowTracker : IDisposable
     private IReadOnlyList<RunningWindow> _windows = Array.Empty<RunningWindow>();
     private bool _disposed;
     private int _pendingDispatch;
-    private bool _identityRefreshNeeded;
+    private int _identityRefreshNeeded;
     public event EventHandler? Changed;
     public IReadOnlyList<RunningWindow> Windows => _windows;
 
@@ -47,7 +47,13 @@ public sealed class WindowTracker : IDisposable
         // Location events can be frequent during a drag. Only the foreground window can change
         // fullscreen suppression; those events never need to re-enumerate process identities.
         if (eventType == 0x800B && hwnd != GetForegroundWindow()) return;
-        if (eventType != 0x800B) _identityRefreshNeeded = true;
+        // Switching between already indexed windows only changes activation/fullscreen
+        // state. Avoid opening every process and property store on each Alt+Tab.
+        // Creation/show/hide/destruction still invalidate the index; an unknown
+        // foreground window also requests a full discovery pass.
+        var refreshIdentity = eventType is >= 0x8000 and <= 0x8003
+            || (eventType == 0x0003 && !_windows.Any(window => window.Handle == hwnd));
+        if (refreshIdentity) Interlocked.Exchange(ref _identityRefreshNeeded, 1);
         if (Interlocked.Exchange(ref _pendingDispatch, 1) != 0) return;
         if (!_dispatcher.HasShutdownStarted)
             _dispatcher.BeginInvoke(DispatcherPriority.Background, new Action(() =>
@@ -59,7 +65,7 @@ public sealed class WindowTracker : IDisposable
     private void RefreshTick(object? sender, EventArgs e)
     {
         _debounce.Stop();
-        if (_identityRefreshNeeded) { _identityRefreshNeeded = false; Refresh(); }
+        if (Interlocked.Exchange(ref _identityRefreshNeeded, 0) != 0) Refresh();
         else if (!_disposed) Changed?.Invoke(this, EventArgs.Empty);
     }
 

@@ -22,7 +22,8 @@ try {
     $LumaShortcut.TargetPath = $Executable
     $LumaShortcut.Arguments = '--show-launchpad'
     $LumaShortcut.WorkingDirectory = Split-Path -Parent $Executable
-    $LumaShortcut.IconLocation = $Executable + ',0'
+    $LumaStandaloneIcon = Join-Path (Split-Path -Parent $Executable) 'LumaDock.ico'
+    $LumaShortcut.IconLocation = if (Test-Path -LiteralPath $LumaStandaloneIcon -PathType Leaf) { $LumaStandaloneIcon + ',0' } else { $Executable + ',0' }
     $LumaShortcut.Description = $LumaMarker
     $LumaShortcut.WindowStyle = 1
     $LumaShortcut.Save()

@@ -66,7 +66,9 @@ public sealed class AppController : IDisposable
     {
         // Font, mouse and other preference broadcasts must not rewrite configuration
         // or recreate the Dock when the resolved system theme has not changed.
-        if (disposed || State.Settings.Theme != "System" || Theme.ResolveDark("System") == Theme.IsDark) return;
+        if (disposed) return;
+        Typography.RefreshPalette();
+        if (State.Settings.Theme != "System" || Theme.ResolveDark("System") == Theme.IsDark) return;
         Theme.Apply("System", State.Settings.Accent);
         dock?.UpdateSettings();
         Changed?.Invoke(this, EventArgs.Empty);
@@ -93,6 +95,7 @@ public sealed class AppController : IDisposable
         if (font.Underline) decorations.Add(TextDecorations.Underline[0]);
         if (font.Strikeout) decorations.Add(TextDecorations.Strikethrough[0]);
         decorations.Freeze(); resources["AppNameDecorations"] = decorations;
+        Typography.Apply(font, State.Settings);
     }
 
     public async Task RefreshAppsAsync()
@@ -128,6 +131,7 @@ public sealed class AppController : IDisposable
         catch (Exception ex) { Log.Write("Save failed", ex); Notify("配置保存失败：" + ex.Message); }
     }
     public void Pin(AppEntry app) { app.Hidden = false; if (!State.PinnedIds.Contains(app.Id)) State.PinnedIds.Add(app.Id); Save(); }
+    public void PinAt(AppEntry app, int gap) { app.Hidden = false; DockOrder.InsertAtGap(State.PinnedIds, [app.Id], gap); Save(); }
     public void Unpin(AppEntry app) { State.PinnedIds.Remove(app.Id); Save(); }
     public void SetCustomIcon(AppEntry app, string? path)
     {
@@ -148,12 +152,40 @@ public sealed class AppController : IDisposable
         catch (Exception error) { Notify(error.Message); }
     }
     public void Remove(AppEntry app) { app.Hidden = true; State.PinnedIds.Remove(app.Id); Save(); }
-    public void AddManual(string path)
+    public void AddManual(string path) { GetOrAddManual(path); Save(); }
+    public AppEntry GetOrAddManual(string path)
     {
-        if (!File.Exists(path)) throw new FileNotFoundException("找不到应用或快捷方式。", path);
+        ValidateAppPath(path);
+        var found = AppDiscovery.FromPath(path);
+        Catalog.Merge(State, [found]);
+        var app = Catalog.FindEquivalent(State, found) ?? throw new InvalidOperationException("应用暂时无法添加。");
+        app.Hidden = false; return app;
+    }
+    public async Task AddPathsToDockAsync(IEnumerable<string> paths, int gap)
+    {
+        var batch = paths.Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+        var result = await RunStaAsync(() =>
+        {
+            var found = new List<AppEntry>(); var failures = 0;
+            foreach (var path in batch)
+            {
+                try { ValidateAppPath(path); found.Add(AppDiscovery.FromPath(path)); }
+                catch (Exception error) when (error is IOException or UnauthorizedAccessException or ArgumentException or System.Runtime.InteropServices.COMException) { failures++; Log.Write("Dock import skipped an unavailable file", error); }
+            }
+            return (found, failures);
+        });
+        if (disposed) return;
+        Catalog.Merge(State, result.found);
+        var apps = result.found.Select(found => Catalog.FindEquivalent(State, found)).OfType<AppEntry>().DistinctBy(app => app.Id).ToArray();
+        foreach (var app in apps) app.Hidden = false;
+        DockOrder.InsertAtGap(State.PinnedIds, apps.Select(app => app.Id), gap);
+        if (apps.Length > 0) Save();
+        if (result.failures > 0) Notify("有些文件无法加入 Dock，请选择程序或快捷方式。");
+    }
+    private static void ValidateAppPath(string path)
+    {
+        if (!File.Exists(path)) throw new FileNotFoundException("找不到应用或快捷方式。");
         if (!new[] { ".exe", ".lnk", ".url", ".appref-ms" }.Contains(Path.GetExtension(path).ToLowerInvariant())) throw new InvalidDataException("请选择 .exe、.lnk、.url 或 .appref-ms 文件。");
-        var app = AppDiscovery.FromPath(path); var old = State.Apps.FirstOrDefault(a => a.Id == app.Id);
-        if (old != null) old.Hidden = false; else { app.Category = Catalog.SuggestCategory(app.Name); State.Apps.Add(app); } Save();
     }
     public void Launch(AppEntry app)
     {
@@ -220,7 +252,7 @@ public sealed class AppController : IDisposable
     {
         var apps = State.Apps;
         State = new AppState { Apps = apps, Settings = new DockSettings { StartWithWindows = StartupService.IsEnabled } };
-        foreach (var a in State.Apps) { a.Hidden = false; a.Category = Catalog.SuggestCategory(a.Name); a.CustomIconPath = ""; }
+        foreach (var a in State.Apps) { a.Hidden = false; a.Category = Catalog.SuggestCategory(a); a.CategoryIsUserAssigned = false; a.CategoryRuleVersion = Catalog.CategoryRuleVersion; a.CustomIconPath = ""; }
         ApplySettings();
     }
     public void Notify(string message)

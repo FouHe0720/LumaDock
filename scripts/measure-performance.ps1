@@ -15,9 +15,24 @@ namespace LumaDock {
     public static class PerformanceNative {
         [DllImport("user32.dll")] private static extern IntPtr GetForegroundWindow();
         [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr window, out uint processId);
+        [StructLayout(LayoutKind.Sequential)] private struct CaretRect { public int Left, Top, Right, Bottom; }
+        [StructLayout(LayoutKind.Sequential)] private struct GuiThreadInfo {
+            public int Size; public uint Flags;
+            public IntPtr Active, Focus, Capture, MenuOwner, MoveSize, Caret;
+            public CaretRect CaretBounds;
+        }
+        [DllImport("user32.dll")] private static extern bool GetGUIThreadInfo(uint threadId, ref GuiThreadInfo information);
         public static bool IsForeground(int processId) {
             uint foregroundId; GetWindowThreadProcessId(GetForegroundWindow(), out foregroundId);
             return foregroundId == (uint)processId;
+        }
+        public static bool HasNativeCaret(int processId) {
+            uint foregroundId;
+            var thread = GetWindowThreadProcessId(GetForegroundWindow(), out foregroundId);
+            if (foregroundId != (uint)processId) return false;
+            var information = new GuiThreadInfo { Size = Marshal.SizeOf<GuiThreadInfo>() };
+            return GetGUIThreadInfo(thread, ref information) && information.Caret != IntPtr.Zero
+                && information.CaretBounds.Bottom > information.CaretBounds.Top;
         }
     }
 }
@@ -71,6 +86,7 @@ try {
             handles = $LumaMeasuredProcess.HandleCount
             threads = $LumaMeasuredProcess.Threads.Count
             isForeground = [LumaDock.PerformanceNative]::IsForeground($LumaMeasuredProcess.Id)
+            hasNativeCaret = [LumaDock.PerformanceNative]::HasNativeCaret($LumaMeasuredProcess.Id)
         })
         $LumaPreviousCpu = $LumaCpu
         $LumaPreviousTime = $LumaNow
@@ -98,6 +114,8 @@ $LumaSummary = [ordered]@{
     actualTotalSeconds = [math]::Round($LumaTimer.Elapsed.TotalSeconds, 3)
     launchpadOpen = [bool]$ShowLaunchpad
     sampleCount = $LumaSamples.Count
+    foregroundSamples = @($LumaSamples | Where-Object isForeground).Count
+    nativeCaretSamples = @($LumaSamples | Where-Object hasNativeCaret).Count
     averageCpuPercentMachine = ($LumaSamples | Measure-Object cpuPercentMachine -Average).Average
     averageCpuPercentOneCore = ($LumaSamples | Measure-Object cpuPercentOneCore -Average).Average
     peakWorkingSetMB = ($LumaSamples | Measure-Object workingSetMB -Maximum).Maximum

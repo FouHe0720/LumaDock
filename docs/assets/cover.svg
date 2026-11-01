@@ -5,7 +5,8 @@
     <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#10212d"/><stop offset=".55" stop-color="#17323b"/><stop offset="1" stop-color="#252640"/></linearGradient>
     <linearGradient id="edge" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#edfffb" stop-opacity=".7"/><stop offset=".45" stop-color="#bddeed" stop-opacity=".06"/><stop offset="1" stop-color="#d2bfee" stop-opacity=".48"/></linearGradient>
     <linearGradient id="glass" x1="0" y1="0" x2=".5" y2="1"><stop stop-color="#e9fff9" stop-opacity=".11"/><stop offset="1" stop-color="#b5c4f5" stop-opacity=".025"/></linearGradient>
-    <linearGradient id="logo" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#a6e4d1"/><stop offset="1" stop-color="#83b7d4"/></linearGradient>
+    <linearGradient id="logo" x1="0" y1="0" x2=".8" y2="1"><stop stop-color="#466c7d"/><stop offset=".52" stop-color="#243d50"/><stop offset="1" stop-color="#142738"/></linearGradient>
+    <linearGradient id="ribbon" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#f0fff9"/><stop offset=".57" stop-color="#c9f5e9"/><stop offset="1" stop-color="#77c9c5"/></linearGradient>
     <radialGradient id="wash"><stop stop-color="#76c9bf" stop-opacity=".2"/><stop offset="1" stop-color="#76c9bf" stop-opacity="0"/></radialGradient>
     <clipPath id="frame"><rect width="1280" height="420" rx="30"/></clipPath>
   </defs>
@@ -18,8 +19,11 @@
       <path d="M970 0c88 0 181 36 212 102 33 70-15 150-93 174-76 24-170-3-205-70-35-67 9-183 86-206Z"/>
     </g>
     <path d="M680 394c118-120 218-4 310-88s198-73 314-22" fill="none" stroke="#b3c4ec" stroke-opacity=".13" stroke-width="64"/>
-    <rect x="75" y="90" width="66" height="66" rx="20" fill="url(#logo)"/>
-    <path d="M98 107v31h23" fill="none" stroke="#173b48" stroke-width="5.5" stroke-linejoin="round" stroke-linecap="round"/>
+    <g transform="translate(72 87) scale(.285)">
+      <path d="M73 9H178C221 9 247 35 247 78V178C247 222 221 247 178 247H78C34 247 9 221 9 178V74C9 33 32 9 73 9Z" fill="url(#logo)" stroke="url(#edge)" stroke-width="2"/>
+      <path d="M78 65H105V143C105 159 112 167 128 167H184V193H122C93 193 78 177 78 148Z" fill="url(#ribbon)"/>
+      <path d="M24 89V76C24 43 42 24 77 24H156" fill="none" stroke="#e7fff9" stroke-opacity=".45" stroke-width="2" stroke-linecap="round"/>
+    </g>
     <text x="75" y="244" font-family="Segoe UI Variable Display, Segoe UI, sans-serif" font-size="75" font-weight="600" letter-spacing="-2" fill="#edf8f6">LumaDock</text>
     <text x="80" y="292" font-family="Segoe UI, Microsoft YaHei UI, sans-serif" font-size="19" letter-spacing="2" fill="#b9d4d7">Dock · 应用库 · 桌面集</text>
     <path d="M80 335h47" stroke="#97d6c4" stroke-width="3" stroke-linecap="round"/>

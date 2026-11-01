@@ -11,6 +11,8 @@ public sealed class AppEntry
     public string AppUserModelId { get; set; } = "";
     public string CustomIconPath { get; set; } = "";
     public string Category { get; set; } = "其他";
+    public bool CategoryIsUserAssigned { get; set; }
+    public int CategoryRuleVersion { get; set; }
     public string Source { get; set; } = "Manual";
     public List<string> DesktopPaths { get; set; } = [];
     public bool Hidden { get; set; }
@@ -44,6 +46,7 @@ public sealed class DockSettings
     public bool NameFontBold { get; set; }
     public string NameFontFamily { get; set; } = "";
     public bool NameFontItalic { get; set; }
+    public string TextColor { get; set; } = "";
     public bool StartWithWindows { get; set; }
     public bool CloseToTray { get; set; } = true;
 }

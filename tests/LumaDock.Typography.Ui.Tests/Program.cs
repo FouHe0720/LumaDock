@@ -8,6 +8,8 @@ using System.Windows.Controls.Primitives;
 using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
+using System.Windows.Media.Animation;
+using System.Reflection;
 using System.Windows.Threading;
 using LumaDock.App;
 using LumaDock.App.Center;
@@ -22,6 +24,7 @@ internal static class Program
     private static readonly List<TestResult> Tests = [];
     private static readonly List<Snapshot> Snapshots = [];
     private static readonly List<string> Errors = [];
+    private static readonly List<object> NativeCaretChecks = [];
     private static int exitCode = 1;
 
     [STAThread]
@@ -58,6 +61,25 @@ internal static class Program
                     CheckFont(window, nativeFont);
                     CheckLabelBounds(window);
                 });
+                Test("Sidebar, categories and headings read actual system font weight without enlarging navigation", () => CheckInterfaceFont(window, nativeFont));
+                await TestAsync("A local font-change delivery updates existing interface labels without modifying Windows", async () =>
+                {
+                    // Inject into this controller's font service only: this exercises the
+                    // same Changed handler used for native notifications, never SPI_SET.
+                    var service = (DesktopFontService)typeof(AppController).GetField("desktopFont", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.GetValue(controller)!;
+                    var current = typeof(DesktopFontService).GetProperty(nameof(DesktopFontService.Current))!;
+                    var changed = typeof(AppController).GetMethod("DesktopFontChanged", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
+                    var originalLabels = Descendants<TextBlock>(window).Where(text => Equals(text.Tag, "NavigationLabel")).ToArray();
+                    var injected = nativeFont with { Weight = nativeFont.Weight == 800 ? 700 : 800 };
+                    try
+                    {
+                        current.SetValue(service, injected); changed.Invoke(controller, [service, EventArgs.Empty]);
+                        Require(originalLabels.All(label => label.FontWeight.ToOpenTypeWeight() == injected.Weight), "Existing navigation labels ignored font-change resources.");
+                        await Frame(); CheckInterfaceFont(window, injected); CheckFont(window, injected);
+                        Require(DesktopFontService.Read() == nativeFont, "Font notification test changed the real system font.");
+                    }
+                    finally { current.SetValue(service, nativeFont); changed.Invoke(controller, [service, EventArgs.Empty]); await Frame(); }
+                });
                 Test("Each application exposes one named accessible button with an invoke action", () =>
                 {
                     var tiles = Descendants<Button>(window).Where(b => b.DataContext is AppTileViewModel).ToArray();
@@ -83,6 +105,65 @@ internal static class Program
                     Require(Descendants<TextBlock>(all).Any(text => text.Text == expected.ToString()), "The visible count did not update.");
                 });
                 search.Clear(); await Frame();
+
+                // Enable only this isolated application's own window for the
+                // native caret contract, then return to the disabled test mode.
+                var nativeBlinkBefore = GetCaretBlinkTime();
+                var ownHwnd = new WindowInteropHelper(window).Handle;
+                EnableWindow(ownHwnd, true);
+                try
+                {
+                    window.Activate(); search.Focus();
+                    var focusedClock = await WaitForStoppedCaret(window, search);
+                    Test("Focused search stops the retained root clock while preserving a native caret", () =>
+                    {
+                        Require(search.IsKeyboardFocused, "The actual search TextBox did not receive keyboard focus.");
+                        Require(focusedClock.CurrentState == ClockState.Stopped, "The retained caret root clock remained active.");
+                        CheckNativeCaret(ownHwnd, "focused-search");
+                        Require(GetCaretBlinkTime() == nativeBlinkBefore, "The Windows caret blink setting changed.");
+                    });
+                    search.Text = "LumaDock 查找"; search.Select(0, 8); search.SelectedText = "窗口"; search.Select(0, 2);
+                    await Frame();
+                    Test("Steady caret preserves actual text editing and selection", () =>
+                    {
+                        Require(search.Text.StartsWith("窗口", StringComparison.Ordinal) && search.SelectedText == "窗口" && search.SelectionLength == 2, "Search editing or selection stopped working.");
+                        Require(GetCaretBlinkTime() == nativeBlinkBefore, "Editing changed the system caret blink setting.");
+                    });
+                    search.Clear(); search.Select(0, 0); await WaitForStoppedCaret(window, search);
+                    var unfocusedClock = CaretClock(window)!;
+                    Descendants<Button>(window).Single(button => Equals(button.Tag, "全部应用")).Focus(); await Frame();
+                    Test("Moving focus away stops the previous caret clock", () => Require(unfocusedClock.CurrentState == ClockState.Stopped, "An unfocused TextBox retained an active root clock."));
+                    search.Focus(); await WaitForStoppedCaret(window, search);
+                    search.FontFamily = new FontFamily("Consolas"); search.FontWeight = FontWeights.Normal; search.FontStyle = FontStyles.Italic; search.FontSize = 18;
+                    var changedClock = await WaitForStoppedCaret(window, search);
+                    Test("Font changes keep the focused native caret usable without restarting idle animation", () =>
+                    {
+                        Require(changedClock.CurrentState == ClockState.Stopped, "A font change restarted the retained clock.");
+                        CheckNativeCaret(ownHwnd, "font-change");
+                    });
+                    // A pending Begin is deliberately queued immediately before
+                    // removal to exercise cleanup before WPF's next timing tick.
+                    changedClock.Controller!.Begin(); window.Navigate("Settings"); await Frame();
+                    Test("Removing a focused search cancels even a pending native clock start", () =>
+                    {
+                        Require(!search.IsLoaded && changedClock.CurrentState == ClockState.Stopped, "A removed TextBox left an orphan root clock.");
+                    });
+                    window.Navigate("Launchpad"); await Frame(); search = Descendants<TextBox>(window).Single(box => System.Windows.Automation.AutomationProperties.GetName(box) == "搜索应用");
+                    search.Focus(); var beforeThemeClock = await WaitForStoppedCaret(window, search);
+                    var previousTheme = controller.State.Settings.Theme;
+                    controller.State.Settings.Theme = previousTheme == "Dark" ? "Light" : "Dark"; controller.ApplySettings(); await Frame();
+                    search = Descendants<TextBox>(window).Single(box => System.Windows.Automation.AutomationProperties.GetName(box) == "搜索应用");
+                    search.Focus(); await WaitForStoppedCaret(window, search);
+                    Test("Theme refresh retires the old clock and preserves the new native caret", () =>
+                    {
+                        Require(beforeThemeClock.CurrentState == ClockState.Stopped, "Theme refresh left the old clock active.");
+                        CheckNativeCaret(ownHwnd, "theme-change");
+                        Require(GetCaretBlinkTime() == nativeBlinkBefore, "Caret suppression changed the Windows setting.");
+                    });
+                    controller.State.Settings.Theme = previousTheme; controller.ApplySettings(); await Frame();
+                }
+                finally { EnableWindow(ownHwnd, false); }
+                window.Navigate("Launchpad"); await Frame();
 
                 // Use the visible tile and its real controller/menu/binding data
                 // flow. Only the isolated profile and a synthetic PNG are written.
@@ -135,6 +216,7 @@ internal static class Program
                 Test("Manual 28 DIP bold names retain two lines inside their tiles", () =>
                 {
                     CheckManualFont(window, 28);
+                    CheckInterfaceFont(window, controller.NameFont);
                     CheckLabelBounds(window);
                     Require(mediumSnapshot.Columns <= defaultSnapshot.Columns, "Larger names increased the column density.");
                 });
@@ -236,7 +318,7 @@ internal static class Program
                 textJump.RaiseEvent(new RoutedEventArgs(Button.ClickEvent)); await Frame();
                 Test("The text shortcut positions the font section at the top of its viewport", () =>
                 {
-                    var heading = Descendants<TextBlock>(window).Single(text => text.Text == "名称字体");
+                    var heading = Descendants<TextBlock>(window).Single(text => text.Text == "字体与文字");
                     var viewport = Ancestor<ScrollViewer>(heading)!;
                     var y = heading.TranslatePoint(new Point(), viewport).Y;
                     Require(y >= -1 && y < 50, "The text shortcut left the font controls below the viewport.");
@@ -249,7 +331,29 @@ internal static class Program
                     Require(preview.FontFamily.Source == "Microsoft YaHei UI" && preview.FontSize == 18 && preview.FontStyle == FontStyles.Italic, "Live font preview does not match local settings.");
                     Require(DesktopFontService.Read() == nativeFont, "Font preview changed Windows typography.");
                 });
+                var textSwatch = Descendants<Button>(window).Single(button => Equals(button.Tag, "TextColor:#B8E2F5"));
+                textSwatch.RaiseEvent(new RoutedEventArgs(Button.ClickEvent)); await Frame();
+                Test("Text color selection applies through the actual setting action and persists", () =>
+                {
+                    Require(new StateStore(dataPath).Load().Settings.TextColor == "#B8E2F5", "Text color did not persist.");
+                    var preview = Descendants<TextBlock>(window).Single(text => Equals(text.Tag, "NameFontPreview"));
+                    Require(((SolidColorBrush)preview.Foreground).Color == Color.FromRgb(184, 226, 245), "Text color did not reach the live preview.");
+                    Require(System.Windows.Automation.AutomationProperties.GetItemStatus(textSwatch) == "已选择", "Selected text color state was not exposed.");
+                });
                 window.Navigate("Launchpad"); await Frame();
+                Test("Custom text color reaches sidebar, categories, page heading and real application names", () => CheckPrimaryTextColor(window, Color.FromRgb(184, 226, 245)));
+                controller.State.Settings.Theme = "Light"; controller.ApplySettings(); await Frame();
+                Test("Theme changes preserve explicitly selected text color", () => CheckPrimaryTextColor(window, Color.FromRgb(184, 226, 245)));
+                window.Navigate("Settings"); await Frame();
+                var automaticText = Descendants<Button>(window).Single(button => Equals(button.Tag, "TextColor:"));
+                automaticText.RaiseEvent(new RoutedEventArgs(Button.ClickEvent)); await Frame();
+                window.Navigate("Launchpad"); await Frame();
+                Test("Automatic text color restores theme contrast and leaves Windows font untouched", () =>
+                {
+                    CheckPrimaryTextColor(window, Color.FromRgb(32, 44, 59));
+                    Require(new StateStore(dataPath).Load().Settings.TextColor == "", "Automatic color did not clear the local override.");
+                    Require(DesktopFontService.Read() == nativeFont, "Text personalization changed Windows typography.");
+                });
                 // Exercise the actual finite WPF motion timer; these calls affect only this isolated window.
                 var rim = Descendants<FrameworkElement>(window).Single(element => element.GetType().Name == "GlassRim");
                 var rimType = rim.GetType();
@@ -280,8 +384,9 @@ internal static class Program
                     durationMs = timer.Elapsed.TotalMilliseconds, nativeFont,
                     testCount = Tests.Count, tests = Tests, snapshots = Snapshots, errors = Errors,
                     systemSettingsChanged = false, systemFontChanged = false, appLaunches = 0,
-                    controllerStartCalled = false, nativeWindowsDisabledForFocusSafety = true,
-                    interpretation = "Checks actual WPF labels, local font preferences, category counts and bounded interactive motion using isolated application data. Windows global typography is not modified."
+                    controllerStartCalled = false, nativeWindowsDisabledExceptOwnCaretContract = true,
+                    nativeCaretChecks = NativeCaretChecks,
+                    interpretation = "Checks actual WPF labels, local preferences, native caret/root-clock lifecycle, category counts and bounded motion using isolated data. Editing is programmatic; external IME composition is not tested. Font-change delivery uses local service injection. Windows typography and caret blink settings are not modified."
                 };
                 Directory.CreateDirectory(Path.GetDirectoryName(reportPath)!);
                 File.WriteAllText(reportPath, JsonSerializer.Serialize(report, new JsonSerializerOptions { WriteIndented = true }));
@@ -315,6 +420,33 @@ internal static class Program
             Require(Math.Abs(label.FontSize - size) < .01, "Manual font size did not reach an application label.");
             Require(label.FontWeight.ToOpenTypeWeight() >= 700, "Manual bold did not reach an application label.");
         }
+    }
+
+    private static void CheckInterfaceFont(ControlCenterWindow window, DesktopFontInfo font)
+    {
+        var navigation = Descendants<TextBlock>(window).Where(text => Equals(text.Tag, "NavigationLabel")).ToArray();
+        Require(navigation.Length == 4, "The four navigation labels were not rendered.");
+        foreach (var label in navigation)
+        {
+            var expected = label.Text == "应用库" ? Math.Max(600, font.Weight) : font.Weight;
+            Require(label.FontWeight.ToOpenTypeWeight() == expected, "Navigation ignored the active font weight.");
+            Require(label.FontFamily.Source == font.FamilyName, "Navigation ignored the active font family.");
+            Require(label.FontSize <= 15 && label.ActualWidth < 110, "Name font size expanded or clipped the navigation.");
+        }
+        var heading = Descendants<TextBlock>(window).Single(text => Equals(text.Tag, "PageHeading"));
+        Require(heading.FontWeight.ToOpenTypeWeight() == Math.Max(600, font.Weight), "Page heading ignored font weight.");
+        var all = Descendants<Button>(window).Single(button => Equals(button.Tag, "全部应用"));
+        Require(Descendants<TextBlock>(all).First().FontWeight.ToOpenTypeWeight() == Math.Max(600, font.Weight), "Selected category ignored font weight.");
+        var unselected = Descendants<Button>(window).Single(button => Equals(button.Tag, "Dock 已固定"));
+        Require(Descendants<TextBlock>(unselected).First().FontWeight.ToOpenTypeWeight() == font.Weight, "Category label ignored the active font weight.");
+    }
+
+    private static void CheckPrimaryTextColor(ControlCenterWindow window, Color expected)
+    {
+        var primary = Descendants<TextBlock>(window).Where(text => Equals(text.Tag, "NavigationLabel") || Equals(text.Tag, "PageHeading") || Equals(text.Tag, "ApplicationName"))
+            .Concat(Descendants<Button>(window).Where(button => Equals(button.Tag, "全部应用") || Equals(button.Tag, "Dock 已固定")).Select(button => Descendants<TextBlock>(button).First())).ToArray();
+        Require(primary.Length >= 8, "Primary labels are missing from the actual visual tree.");
+        Require(primary.All(text => text.Foreground is SolidColorBrush brush && brush.Color == expected), "A primary interface label ignored custom text color.");
     }
 
     private static void CheckLabelBounds(ControlCenterWindow window)
@@ -370,6 +502,32 @@ internal static class Program
         await Task.Delay(50);
         await Application.Current.Dispatcher.InvokeAsync(() => { }, DispatcherPriority.ApplicationIdle);
     }
+    private static AnimationClock? CaretClock(ControlCenterWindow window)
+    {
+        var element = Descendants<UIElement>(window).FirstOrDefault(element => element.GetType().FullName == "System.Windows.Documents.CaretElement");
+        var field = element?.GetType().GetField("_blinkAnimationClock", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.DeclaredOnly);
+        Require(field?.FieldType == typeof(AnimationClock), "The bundled WPF caret clock compatibility contract changed.");
+        return field!.GetValue(element) as AnimationClock;
+    }
+    private static async Task<AnimationClock> WaitForStoppedCaret(ControlCenterWindow window, TextBox search)
+    {
+        for (var attempt = 0; attempt < 25; attempt++)
+        {
+            await Frame();
+            if (search.IsKeyboardFocused && CaretClock(window) is { CurrentState: ClockState.Stopped } clock) return clock;
+        }
+        throw new InvalidOperationException("The focused native caret root clock did not settle to Stopped.");
+    }
+    private static void CheckNativeCaret(IntPtr expectedWindow, string scenario)
+    {
+        var info = new GuiThreadInfo { Size = (uint)Marshal.SizeOf<GuiThreadInfo>() };
+        Require(GetGUIThreadInfo(GetCurrentThreadId(), ref info), "Native GUI thread information could not be read.");
+        Require(info.Caret == expectedWindow, "The native caret window was lost.");
+        Require(info.CaretRect.Bottom > info.CaretRect.Top && info.CaretRect.Right >= info.CaretRect.Left, "The native caret rectangle was lost.");
+        NativeCaretChecks.Add(new { scenario, caretWindowMatches = info.Caret == expectedWindow,
+            caretWidth = info.CaretRect.Right - info.CaretRect.Left, caretHeight = info.CaretRect.Bottom - info.CaretRect.Top,
+            systemBlinkMilliseconds = GetCaretBlinkTime() });
+    }
     private static async Task<Button> WaitForIcon(ControlCenterWindow window, string id, Func<BitmapSource?, bool> ready)
     {
         for (var attempt = 0; attempt < 60; attempt++)
@@ -403,6 +561,16 @@ internal static class Program
     private static void Require(bool condition, string explanation) { if (!condition) throw new InvalidOperationException(explanation); }
     private static string? Argument(string[] args, string key) { var index = Array.IndexOf(args, key); return index >= 0 && index + 1 < args.Length ? args[index + 1] : null; }
     [DllImport("user32.dll")] private static extern bool EnableWindow(IntPtr window, bool enabled);
+    [DllImport("user32.dll")] private static extern uint GetCaretBlinkTime();
+    [DllImport("user32.dll")] private static extern bool GetGUIThreadInfo(uint threadId, ref GuiThreadInfo info);
+    [DllImport("kernel32.dll")] private static extern uint GetCurrentThreadId();
+    [StructLayout(LayoutKind.Sequential)] private struct NativeRect { public int Left, Top, Right, Bottom; }
+    [StructLayout(LayoutKind.Sequential)] private struct GuiThreadInfo
+    {
+        public uint Size, Flags;
+        public IntPtr Active, Focus, Capture, MenuOwner, MoveSize, Caret;
+        public NativeRect CaretRect;
+    }
     private sealed record TestResult(string Name, bool Passed, string? Error);
     private sealed record Snapshot(string Name, int VisibleTileCount, int Columns, string Family, double SizeDip, int Weight,
         double NameHeight, double LineHeight, double GridWidth, double GridHeight);

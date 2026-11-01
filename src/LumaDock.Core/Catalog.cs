@@ -5,35 +5,100 @@ namespace LumaDock.Core;
 
 public static class Catalog
 {
+    public const int CategoryRuleVersion = 1;
     public static string StableId(string source) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(source.ToUpperInvariant())))[..24];
 
-    public static string SuggestCategory(string name)
-    {
-        var n = name.ToLowerInvariant();
-        if (new[] { "visual studio", "code", "git", "python", "terminal", "docker", "idea", "rider" }.Any(n.Contains)) return "开发工具";
-        if (new[] { "chrome", "edge", "firefox", "browser", "浏览器" }.Any(n.Contains)) return "浏览器";
-        if (new[] { "word", "excel", "powerpoint", "office", "onenote", "notion", "学习" }.Any(n.Contains)) return "办公学习";
-        if (new[] { "music", "spotify", "vlc", "音乐", "视频" }.Any(n.Contains)) return "影音娱乐";
-        if (new[] { "steam", "game", "游戏", "xbox" }.Any(n.Contains)) return "游戏";
-        if (new[] { "设置", "管理", "control", "settings", "explorer", "记事本", "计算器" }.Any(n.Contains)) return "系统工具";
-        return "其他";
-    }
+    public static string SuggestCategory(string name) => AppCategories.Suggest(name);
+    public static string SuggestCategory(AppEntry app) => AppCategories.Suggest(app.Name, app.ExecutablePath);
+    public static void AssignCategory(AppEntry app, string category)
+    { app.Category = category; app.CategoryIsUserAssigned = true; app.CategoryRuleVersion = CategoryRuleVersion; }
+    public static AppEntry? FindEquivalent(AppState state, AppEntry app) => state.Apps.FirstOrDefault(existing => AppIdentity.AreEquivalent(existing, app));
 
     // Discovery updates launch metadata, while retaining user classification, order and tombstones.
     public static void Merge(AppState state, IEnumerable<AppEntry> discovered)
     {
+        foreach (var app in state.Apps) UpdateAutomaticCategory(app);
         var known = state.Apps.ToDictionary(a => a.Id, StringComparer.OrdinalIgnoreCase);
         foreach (var app in discovered)
         {
-            if (known.TryGetValue(app.Id, out var existing))
+            var exact = known.TryGetValue(app.Id, out var existing);
+            existing ??= FindEquivalent(state, app);
+            if (existing != null)
             {
-                existing.Name = app.Name; existing.LaunchPath = app.LaunchPath;
-                existing.Arguments = app.Arguments; existing.WorkingDirectory = app.WorkingDirectory;
-                existing.ExecutablePath = app.ExecutablePath; existing.AppUserModelId = app.AppUserModelId;
-                existing.Source = app.Source; existing.DesktopPaths = app.DesktopPaths;
+                MergeMetadata(existing, app, exact || LaunchRank(app) < LaunchRank(existing));
+                if (!existing.CategoryIsUserAssigned) existing.Category = SuggestCategory(existing);
             }
-            else { app.Category = SuggestCategory(app.Name); state.Apps.Add(app); known[app.Id] = app; }
+            else
+            {
+                app.Category = SuggestCategory(app); app.CategoryRuleVersion = CategoryRuleVersion;
+                state.Apps.Add(app); known[app.Id] = app;
+            }
         }
+        Deduplicate(state);
+        foreach (var category in state.Apps.Select(app => app.Category).Distinct()) if (!state.Categories.Contains(category)) state.Categories.Add(category);
+    }
+
+    // Canonical IDs and the first user order survive an upgrade. Duplicate pins map to that same ID.
+    // A hidden record remains a tombstone even if another discovery source lists the same launch action.
+    public static void Deduplicate(AppState state)
+    {
+        // A late Shell record can connect a file target with an earlier AUMID-only record.
+        // Repeat only while a record was actually removed; no polling or background work.
+        while (DeduplicatePass(state)) { }
+    }
+
+    private static bool DeduplicatePass(AppState state)
+    {
+        var originalCount = state.Apps.Count;
+        var result = new List<AppEntry>(); var index = new Dictionary<string, List<AppEntry>>(StringComparer.Ordinal);
+        var redirects = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var app in state.Apps)
+        {
+            var keys = AppIdentity.Keys(app).ToArray();
+            var existing = keys.Where(index.ContainsKey).SelectMany(key => index[key]).Distinct()
+                .FirstOrDefault(candidate => AppIdentity.AreEquivalent(candidate, app));
+            if (existing == null) { existing = app; result.Add(app); }
+            else
+            {
+                redirects[app.Id] = existing.Id;
+                MergeMetadata(existing, app, LaunchRank(app) < LaunchRank(existing));
+                if (!existing.CategoryIsUserAssigned && app.CategoryIsUserAssigned)
+                { existing.Category = app.Category; existing.CategoryIsUserAssigned = true; existing.CategoryRuleVersion = app.CategoryRuleVersion; }
+                existing.Hidden |= app.Hidden;
+            }
+            foreach (var key in keys.Concat(AppIdentity.Keys(existing)).Distinct())
+            {
+                if (!index.TryGetValue(key, out var matches)) index[key] = matches = [];
+                if (!matches.Contains(existing)) matches.Add(existing);
+            }
+        }
+        state.Apps = result;
+        state.PinnedIds = state.PinnedIds.Select(id => redirects.GetValueOrDefault(id, id)).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        return result.Count < originalCount;
+    }
+
+    private static void MergeMetadata(AppEntry existing, AppEntry incoming, bool replaceLaunch)
+    {
+        var aumid = string.IsNullOrWhiteSpace(incoming.AppUserModelId) ? existing.AppUserModelId : incoming.AppUserModelId;
+        if (replaceLaunch)
+        {
+            existing.Name = incoming.Name; existing.LaunchPath = incoming.LaunchPath;
+            existing.Arguments = incoming.Arguments; existing.WorkingDirectory = incoming.WorkingDirectory;
+            existing.ExecutablePath = incoming.ExecutablePath; existing.Source = incoming.Source;
+        }
+        if (replaceLaunch || string.IsNullOrWhiteSpace(existing.AppUserModelId)) existing.AppUserModelId = aumid;
+        existing.DesktopPaths = (existing.DesktopPaths ?? []).Concat(incoming.DesktopPaths ?? []).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        if (string.IsNullOrEmpty(existing.CustomIconPath)) existing.CustomIconPath = incoming.CustomIconPath;
+    }
+
+    private static int LaunchRank(AppEntry app) => app.Source switch { "StartMenu" => 0, "Desktop" => 1, "Manual" => 2, "AppsFolder" => 4, _ => 3 };
+
+    private static void UpdateAutomaticCategory(AppEntry app)
+    {
+        if (app.CategoryRuleVersion == 0 && !app.CategoryIsUserAssigned)
+            app.CategoryIsUserAssigned = !AppCategories.WasAutomatic(app.Category ?? "", app.Name ?? "");
+        if (!app.CategoryIsUserAssigned && app.CategoryRuleVersion < CategoryRuleVersion) app.Category = SuggestCategory(app);
+        app.CategoryRuleVersion = CategoryRuleVersion;
     }
 
     public static IEnumerable<AppEntry> Search(AppState state, string query, string? category = null)
@@ -56,8 +121,10 @@ public static class Catalog
             app.DesktopPaths ??= [];
             app.CustomIconPath = NormalizeIconPath(app.CustomIconPath);
             if (string.IsNullOrWhiteSpace(app.Category)) app.Category = "其他";
-            if (!state.Categories.Contains(app.Category)) state.Categories.Add(app.Category);
+            UpdateAutomaticCategory(app);
         }
+        Deduplicate(state);
+        foreach (var app in state.Apps) if (!state.Categories.Contains(app.Category)) state.Categories.Add(app.Category);
         if (!state.Categories.Contains("其他")) state.Categories.Add("其他");
         var ids = state.Apps.Where(a => !a.Hidden).Select(a => a.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
         state.PinnedIds = state.PinnedIds.Where(ids.Contains).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
@@ -76,10 +143,17 @@ public static class Catalog
         s.Columns = Math.Clamp(s.Columns, 3, 10);
         s.NameFontSize = double.IsFinite(s.NameFontSize) ? Math.Clamp(s.NameFontSize, 10, 40) : 15;
         s.NameFontFamily = (s.NameFontFamily ?? "").Trim();
+        s.TextColor = NormalizeTextColor(s.TextColor);
         // Family names only: imported configuration must not turn a font choice into a URI.
         if (s.NameFontFamily.Length > 80 || s.NameFontFamily.Any(c => char.IsControl(c) || c is ':' or '/' or '\\' or '#')) s.NameFontFamily = "";
         if (!new[] { "Bottom", "Top", "Left", "Right" }.Contains(s.Position)) s.Position = "Bottom";
         if (!new[] { "System", "Light", "Dark" }.Contains(s.Theme)) s.Theme = "System";
+    }
+
+    public static string NormalizeTextColor(string? value)
+    {
+        value = (value ?? "").Trim();
+        return value.Length == 7 && value[0] == '#' && value.AsSpan(1).IndexOfAnyExcept("0123456789abcdefABCDEF".AsSpan()) < 0 ? value.ToUpperInvariant() : "";
     }
 
     public static string NormalizeIconPath(string? value)

@@ -26,6 +26,8 @@ public sealed class DockWindow : Window
     private readonly LiquidGlassSurface liquid;
     private readonly StackPanel items = new();
     private readonly ScrollViewer scroll = new() { HorizontalScrollBarVisibility = ScrollBarVisibility.Hidden, VerticalScrollBarVisibility = ScrollBarVisibility.Disabled, CanContentScroll = false };
+    private readonly Canvas dropOverlay = new() { IsHitTestVisible = false };
+    private readonly Border insertionCue = new() { CornerRadius = new CornerRadius(2), Visibility = Visibility.Collapsed, BorderThickness = new Thickness(1) };
     private sealed class Tile
     {
         public AppEntry? App; public required Button Button; public required FrameworkElement Visual;
@@ -39,7 +41,7 @@ public sealed class DockWindow : Window
     private Point lastPointer = new(double.NaN, double.NaN);
     private double bodyThickness, flight, endReserve, radius;
     private readonly DispatcherTimer hideDelay = new() { Interval = TimeSpan.FromMilliseconds(650) };
-    private bool tucked, dragging, rebuilding;
+    private bool tucked, dragging, rebuilding, rebuildAfterDrag, closed;
     private Point dragStart;
     private IntPtr handle;
     private HwndSource? source;
@@ -59,13 +61,16 @@ public sealed class DockWindow : Window
         UseLayoutRounding = true; SnapsToDevicePixels = true;
         scroll.Content = items;
         body.Children.Add(liquid); body.Children.Add(tint); body.Children.Add(highlight);
-        var surface = new Grid(); surface.Children.Add(plate); surface.Children.Add(body); surface.Children.Add(finish); surface.Children.Add(scroll); Content = surface;
+        dropOverlay.Children.Add(insertionCue);
+        var surface = new Grid(); surface.Children.Add(plate); surface.Children.Add(body); surface.Children.Add(finish); surface.Children.Add(scroll); surface.Children.Add(dropOverlay); Content = surface;
         body.SizeChanged += (_, _) => UpdateContour();
         hover.Tick += HoverTick;
         PreviewMouseWheel += (_, e) => { if (Vertical) scroll.ScrollToVerticalOffset(scroll.VerticalOffset - e.Delta); else scroll.ScrollToHorizontalOffset(scroll.HorizontalOffset - e.Delta); e.Handled = true; };
         AllowDrop = true;
-        DragOver += (_, e) => { if (e.Data.GetDataPresent(DataFormats.FileDrop) || e.Data.GetDataPresent("LumaDock.Pin")) e.Effects = DragDropEffects.Copy; e.Handled = true; Reveal(); };
-        Drop += DropFiles;
+        PreviewDragEnter += ShowInsertion;
+        PreviewDragOver += ShowInsertion;
+        PreviewDrop += DropItems;
+        DragLeave += (_, e) => { var p = e.GetPosition(this); if (p.X <= 0 || p.Y <= 0 || p.X >= ActualWidth || p.Y >= ActualHeight) ClearInsertion(); };
         MouseMove += Magnify;
         MouseEnter += (_, _) => { hideDelay.Stop(); Reveal(); };
         MouseLeave += (_, _) => { lastPointer = new(double.NaN, double.NaN); highlight.ReleasePointer(); ResetMagnification(); if (controller.State.Settings.AutoHide) hideDelay.Start(); };
@@ -79,7 +84,7 @@ public sealed class DockWindow : Window
         };
         Loaded += (_, _) => { UpdateSettings(); if (controller.State.Settings.AutoHide) hideDelay.Start(); };
         ContentRendered += (_, _) => controller.RecordDockFrame();
-        Closed += (_, _) => { StopHover(); hover.Tick -= HoverTick; highlight.StopMotion(); hideDelay.Stop(); hideDelay.Tick -= HideTick; source?.RemoveHook(WndProc); generation++; };
+        Closed += (_, _) => { closed = true; ClearInsertion(); StopHover(); hover.Tick -= HoverTick; highlight.StopMotion(); hideDelay.Stop(); hideDelay.Tick -= HideTick; source?.RemoveHook(WndProc); generation++; };
         ContextMenu = new ContextMenu();
         ContextMenu.Closed += (_, _) => ScheduleHide();
         AddMenu(ContextMenu, "打开应用库", () => controller.ShowCenter());
@@ -101,8 +106,7 @@ public sealed class DockWindow : Window
         var baseColor = ((SolidColorBrush)FindResource("OpaqueSurfaceBrush")).Color;
         var opacity = Math.Clamp((controller.State.Settings.Opacity - .55) / .45, 0, 1);
         var realtime = optical && s.LiveGlass;
-        // Opaque underlay is always present while the first asynchronous sample
-        // is loading. The sampled frame itself supplies translucency and optics.
+        // Live mode uses one translucent plate; reduced/static modes retain a solid fallback.
         baseColor.A = realtime ? (byte)(92 + 118 * opacity) : (byte)255;
         if (SystemParameters.HighContrast) baseColor = SystemColors.WindowColor;
         plate.Fill = new SolidColorBrush(baseColor);
@@ -119,11 +123,14 @@ public sealed class DockWindow : Window
 
     public void Rebuild()
     {
+        if (closed) return;
+        if (dragging) { rebuildAfterDrag = true; return; }
         if (rebuilding) return;
         rebuilding = true;
         try
         {
             StopHover();
+            ClearInsertion();
             var version = ++generation;
             tiles.Clear(); items.Children.Clear(); items.Orientation = Vertical ? Orientation.Vertical : Orientation.Horizontal;
             scroll.HorizontalScrollBarVisibility = Vertical ? ScrollBarVisibility.Disabled : ScrollBarVisibility.Hidden;
@@ -148,7 +155,6 @@ public sealed class DockWindow : Window
                 button.Click += (_, _) => controller.Launch(app);
                 button.PreviewMouseLeftButtonDown += (_, e) => dragStart = e.GetPosition(this);
                 button.PreviewMouseMove += (_, e) => BeginReorder(button, app, e);
-                button.Drop += (_, e) => Reorder(app, e);
                 button.ContextMenu = new ContextMenu();
                 button.ContextMenu.Closed += (_, _) => ScheduleHide();
                 AddMenu(button.ContextMenu, "打开 / 切换到应用", () => controller.Launch(app));
@@ -219,6 +225,7 @@ public sealed class DockWindow : Window
         text.SetResourceReference(TextBlock.FontSizeProperty, "AppNameSize");
         text.SetResourceReference(TextBlock.FontWeightProperty, "AppNameWeight");
         text.SetResourceReference(TextBlock.FontStyleProperty, "AppNameStyle");
+        text.SetResourceReference(TextBlock.ForegroundProperty, "AppNameBrush");
         var button = new Button { Content = grid, Width = grid.Width, Height = grid.Height, Padding = new Thickness(0), Margin = new Thickness(0), BorderThickness = new Thickness(0), Background = Brushes.Transparent, Template = TileTemplate, ToolTip = new ToolTip { Content = text, Placement = s.Position switch { "Top" => PlacementMode.Bottom, "Left" => PlacementMode.Right, "Right" => PlacementMode.Left, _ => PlacementMode.Top } }, Tag = app, AllowDrop = app != null, Cursor = Cursors.Hand };
         AutomationProperties.SetName(button, app?.Name ?? "应用库");
         ToolTipService.SetInitialShowDelay(button, 480); ToolTipService.SetBetweenShowDelay(button, 100);
@@ -230,10 +237,16 @@ public sealed class DockWindow : Window
 
     private FrameworkElement LaunchpadMark(double size)
     {
-        var frame = new Border { Width = size + 9, Height = size + 9, CornerRadius = new CornerRadius(13, 19, 13, 19), Background = (Brush)FindResource("AccentSoftBrush"), BorderBrush = (Brush)FindResource("BorderBrush"), BorderThickness = new Thickness(.7), Padding = new Thickness(7) };
-        var grid = new UniformGrid { Rows = 2, Columns = 2 };
-        foreach (var opacity in new[] { 1.0, .6, .6, 1.0 }) grid.Children.Add(new Border { CornerRadius = new CornerRadius(3), Margin = new Thickness(2), Background = (Brush)FindResource("AccentBrush"), Opacity = opacity });
-        frame.Child = grid; return frame;
+        var image = new System.Windows.Controls.Image { Width = size + 9, Height = size + 9, Source = BrandIcon, Stretch = Stretch.Uniform, IsHitTestVisible = false };
+        RenderOptions.SetBitmapScalingMode(image, BitmapScalingMode.HighQuality);
+        return image;
+    }
+    private static readonly BitmapSource BrandIcon = LoadBrandIcon();
+    private static BitmapSource LoadBrandIcon()
+    {
+        using var stream = Application.GetResourceStream(new Uri("pack://application:,,,/LumaDock;component/Assets/LumaDock.ico"))!.Stream;
+        var decoder = new IconBitmapDecoder(stream, BitmapCreateOptions.PreservePixelFormat, BitmapCacheOption.OnLoad);
+        var frame = decoder.Frames.OrderByDescending(image => image.PixelWidth).First(); frame.Freeze(); return frame;
     }
 
     public void RefreshWindows()
@@ -299,7 +312,7 @@ public sealed class DockWindow : Window
         if (IsMouseOver || dragging || ContextMenu?.IsOpen == true || tiles.Any(t => t.Button.ContextMenu?.IsOpen == true) || !controller.State.Settings.AutoHide) return;
         tucked = true; StopHover(); highlight.StopMotion(); scroll.Visibility = Visibility.Collapsed; body.Visibility = Visibility.Collapsed; finish.Visibility = Visibility.Collapsed; Reposition();
     }
-    private void ScheduleHide() { if (controller.State.Settings.AutoHide && !IsMouseOver) hideDelay.Start(); }
+    private void ScheduleHide() { if (!closed && IsVisible && controller.State.Settings.AutoHide && !IsMouseOver) hideDelay.Start(); }
     private void Reveal()
     {
         if (!tucked) return;
@@ -376,32 +389,89 @@ public sealed class DockWindow : Window
         if (e.LeftButton != MouseButtonState.Pressed || dragging) return;
         var p = e.GetPosition(this);
         if (Math.Abs(p.X - dragStart.X) + Math.Abs(p.Y - dragStart.Y) < 10) return;
-        dragging = true;
-        try { System.Windows.DragDrop.DoDragDrop(button, new System.Windows.DataObject("LumaDock.Pin", app.Id), DragDropEffects.Move); }
-        finally { dragging = false; }
-    }
-    private void Reorder(AppEntry target, DragEventArgs e)
-    {
-        if (!e.Data.GetDataPresent("LumaDock.Pin")) return;
-        var id = e.Data.GetData("LumaDock.Pin") as string;
-        var pins = controller.State.PinnedIds; var index = pins.IndexOf(target.Id);
-        if (id != null && pins.Contains(id) && id != target.Id) { pins.Remove(id); pins.Insert(Math.Min(index, pins.Count), id); controller.Save(); }
-        e.Handled = true;
-    }
-    private void DropFiles(object sender, DragEventArgs e)
-    {
-        if (e.Data.GetData(DataFormats.FileDrop) is not string[] paths) return;
-        foreach (var path in paths)
+        dragging = true; e.Handled = true; hideDelay.Stop(); StopHover();
+        try
         {
-            try { controller.AddManual(path); var app = AppDiscovery.FromPath(path); var stored = controller.State.Apps.FirstOrDefault(a => a.Id == app.Id); if (stored != null) controller.Pin(stored); }
-            catch (Exception ex) { controller.Notify(ex.Message); }
+            // Never yield between crossing the drag threshold and entering OLE: a quick
+            // mouse release would otherwise turn a valid gesture into a cancelled drag.
+            // An immutable copy also keeps a scan/settings change from altering an active transfer.
+            var snapshot = new AppEntry { Id = app.Id, Name = app.Name, LaunchPath = app.LaunchPath,
+                Arguments = app.Arguments, WorkingDirectory = app.WorkingDirectory, ExecutablePath = app.ExecutablePath,
+                AppUserModelId = app.AppUserModelId, CustomIconPath = app.CustomIconPath };
+            var data = new DockTransferData(app.Id, () => [DesktopShortcutService.PrepareTransfer(snapshot)], error =>
+            { Storage.Log.Write("Shortcut transfer preparation failed", error); controller.Notify("这个应用暂时无法拖到桌面，Dock 内排序仍可使用。"); });
+            if (closed || controller.IsDisposed || Mouse.LeftButton != MouseButtonState.Pressed || !IsVisible) return;
+            System.Windows.DragDrop.DoDragDrop(button, data, DragDropEffects.Copy);
         }
+        finally
+        {
+            dragging = false; ClearInsertion();
+            if (rebuildAfterDrag) { rebuildAfterDrag = false; Rebuild(); }
+            ScheduleHide();
+        }
+    }
+    private string? DraggedId(IDataObject data)
+    {
+        foreach (var format in new[] { "LumaDock.Pin", "LumaDock.AppEntry.Id" })
+            if (data.GetDataPresent(format) && data.GetData(format) is string id && controller.State.Apps.Any(a => a.Id == id)) return id;
+        return null;
+    }
+    private bool CanAccept(IDataObject data) => DraggedId(data) != null || data.GetDataPresent(DataFormats.FileDrop);
+    private int InsertionGap(Point point)
+    {
+        var coordinate = Vertical ? point.Y : point.X;
+        var apps = tiles.Where(tile => tile.App != null).ToArray();
+        for (var i = 0; i < apps.Length; i++)
+        {
+            var button = apps[i].Button;
+            var center = button.TranslatePoint(new Point(button.ActualWidth / 2, button.ActualHeight / 2), this);
+            if (coordinate < (Vertical ? center.Y : center.X)) return i;
+        }
+        return apps.Length;
+    }
+    private void ShowInsertion(object sender, DragEventArgs e)
+    {
         e.Handled = true;
+        if (!CanAccept(e.Data) || (e.AllowedEffects & DragDropEffects.Copy) == 0) { e.Effects = DragDropEffects.None; ClearInsertion(); return; }
+        e.Effects = DragDropEffects.Copy; Reveal(); hideDelay.Stop(); StopHover();
+        ShowInsertionAt(InsertionGap(e.GetPosition(this)));
+    }
+    private void ShowInsertionAt(int gap)
+    {
+        var apps = tiles.Where(tile => tile.App != null).ToArray();
+        var tile = apps.Length == 0 ? tiles[0] : apps[Math.Clamp(gap, 0, apps.Length - 1)];
+        var button = tile.Button;
+        var origin = button.TranslatePoint(new Point(), this);
+        var along = Vertical ? origin.Y : origin.X;
+        if (apps.Length == 0 || gap >= apps.Length) along += Vertical ? button.ActualHeight : button.ActualWidth;
+        var cross = body.TranslatePoint(new Point(body.ActualWidth / 2, body.ActualHeight / 2), this);
+        insertionCue.Background = (Brush)FindResource("AccentBrush"); insertionCue.BorderBrush = (Brush)FindResource("TextBrush");
+        insertionCue.Width = Vertical ? 26 : 4; insertionCue.Height = Vertical ? 4 : 26;
+        Canvas.SetLeft(insertionCue, Vertical ? cross.X - 13 : Math.Clamp(along - 2, 2, Math.Max(2, ActualWidth - 6)));
+        Canvas.SetTop(insertionCue, Vertical ? Math.Clamp(along - 2, 2, Math.Max(2, ActualHeight - 6)) : cross.Y - 13);
+        insertionCue.Visibility = Visibility.Visible;
+    }
+    private void ClearInsertion() => insertionCue.Visibility = Visibility.Collapsed;
+    private async void DropItems(object sender, DragEventArgs e)
+    {
+        var gap = InsertionGap(e.GetPosition(this));
+        var id = DraggedId(e.Data);
+        var paths = id == null && e.Data.GetDataPresent(DataFormats.FileDrop) ? e.Data.GetData(DataFormats.FileDrop) as string[] : null;
+        e.Handled = true; ClearInsertion();
+        if ((e.AllowedEffects & DragDropEffects.Copy) == 0 || (id == null && paths == null)) { e.Effects = DragDropEffects.None; return; }
+        e.Effects = DragDropEffects.Copy;
+        try
+        {
+            if (id != null) controller.PinAt(controller.State.Apps.First(a => a.Id == id), gap);
+            else if (paths != null) await controller.AddPathsToDockAsync(paths, gap);
+        }
+        catch (Exception error) { controller.Notify(error.Message); }
+        ScheduleHide();
     }
     private void AddFile()
     {
         var dialog = new Microsoft.Win32.OpenFileDialog { Title = "添加应用到 Dock", Filter = "应用与快捷方式|*.exe;*.lnk;*.url;*.appref-ms" };
-        if (dialog.ShowDialog() == true) { var path = dialog.FileName; try { controller.AddManual(path); var app = AppDiscovery.FromPath(path); var stored = controller.State.Apps.First(a => a.Id == app.Id); controller.Pin(stored); } catch (Exception ex) { controller.Notify(ex.Message); } }
+        if (dialog.ShowDialog() == true) { try { var app = controller.GetOrAddManual(dialog.FileName); controller.Pin(app); } catch (Exception ex) { controller.Notify(ex.Message); } }
     }
     private static void AddMenu(ContextMenu menu, string title, Action action) { var item = new MenuItem { Header = title }; item.Click += (_, _) => action(); menu.Items.Add(item); }
     internal void CapturePng(string path)

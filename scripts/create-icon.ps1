@@ -12,20 +12,44 @@ public static class LumaIconWriter {
  public static void Write(string path) {
   var images = new byte[7][]; var sizes = new[]{16,24,32,48,64,128,256}; int imageIndex=0;
   foreach (var size in sizes) {
-   using var bitmap = new Bitmap(size,size,PixelFormat.Format32bppArgb);
-   using var graphics = Graphics.FromImage(bitmap);
+   using var canvas = new Bitmap(size*4,size*4,PixelFormat.Format32bppArgb);
+   using var graphics = Graphics.FromImage(canvas);
    graphics.SmoothingMode = SmoothingMode.AntiAlias;
-   graphics.ScaleTransform(size/256f,size/256f);
+   graphics.ScaleTransform(size*4/256f,size*4/256f);
    using var shape = new GraphicsPath();
-   shape.AddArc(8,8,104,104,180,90); shape.AddArc(144,8,104,104,270,90);
-   shape.AddArc(144,144,104,104,0,90); shape.AddArc(8,144,104,104,90,90); shape.CloseFigure();
-   using var fill = new LinearGradientBrush(new Point(0,8),new Point(210,256),Color.FromArgb(255,142,189,198),Color.FromArgb(255,54,98,128));
+   shape.AddLine(73,9,178,9); shape.AddBezier(178,9,221,9,247,35,247,78);
+   shape.AddLine(247,78,247,178); shape.AddBezier(247,178,247,222,221,247,178,247);
+   shape.AddLine(178,247,78,247); shape.AddBezier(78,247,34,247,9,221,9,178);
+   shape.AddLine(9,178,9,74); shape.AddBezier(9,74,9,33,32,9,73,9); shape.CloseFigure();
+   using var fill = new LinearGradientBrush(new Point(0,0),new Point(205,256),Color.FromArgb(70,108,125),Color.FromArgb(20,39,56));
+   fill.InterpolationColors = new ColorBlend { Colors = new[]{Color.FromArgb(70,108,125),Color.FromArgb(36,61,80),Color.FromArgb(20,39,56)}, Positions=new[]{0f,.52f,1f} };
    graphics.FillPath(fill,shape);
-   using var rim = new Pen(Color.FromArgb(170,255,255,255),3); graphics.DrawPath(rim,shape);
-   using var gloss = new Pen(Color.FromArgb(110,255,255,255),2);
-   graphics.DrawArc(gloss,18,18,98,98,184,86); graphics.DrawLine(gloss,66,18,190,18);
-   using var stem = new Pen(Color.FromArgb(247,255,255,255),23) { StartCap=LineCap.Round,EndCap=LineCap.Round,LineJoin=LineJoin.Round };
-   graphics.DrawLines(stem,new[]{new Point(96,77),new Point(96,179),new Point(167,179)});
+   using var rimFill = new LinearGradientBrush(new Point(0,0),new Point(205,256),Color.FromArgb(220,210,248,240),Color.FromArgb(135,157,194,209));
+   rimFill.InterpolationColors=new ColorBlend {Colors=new[]{Color.FromArgb(220,210,248,240),Color.FromArgb(30,192,221,232),Color.FromArgb(135,157,194,209)},Positions=new[]{0f,.46f,1f}};
+   using var rim = new Pen(rimFill,2); graphics.DrawPath(rim,shape);
+   using var sail = new GraphicsPath();
+   sail.AddLine(22,111,22,77); sail.AddBezier(22,77,22,42,41,22,77,22); sail.AddLine(77,22,173,22);
+   sail.AddBezier(173,22,129,41,110,75,106,124); sail.AddBezier(106,124,77,110,49,107,22,111); sail.CloseFigure();
+   using var sailFill = new LinearGradientBrush(new Point(22,22),new Point(170,130),Color.FromArgb(90,211,255,240),Color.FromArgb(4,121,203,201)); graphics.FillPath(sailFill,sail);
+   using var ribbon = new GraphicsPath();
+   ribbon.AddLine(78,65,105,65); ribbon.AddLine(105,65,105,143);
+   ribbon.AddBezier(105,143,105,159,112,167,128,167); ribbon.AddLine(128,167,184,167);
+   ribbon.AddLine(184,167,184,193); ribbon.AddLine(184,193,122,193);
+   ribbon.AddBezier(122,193,93,193,78,177,78,148); ribbon.CloseFigure();
+   using var shadow = new SolidBrush(Color.FromArgb(85,7,31,46));
+   graphics.TranslateTransform(0,4); graphics.FillPath(shadow,ribbon); graphics.TranslateTransform(0,-4);
+   using var ribbonFill = new LinearGradientBrush(new Point(78,65),new Point(184,193),Color.FromArgb(240,255,249),Color.FromArgb(119,201,197));
+   ribbonFill.InterpolationColors=new ColorBlend {Colors=new[]{Color.FromArgb(240,255,249),Color.FromArgb(201,245,233),Color.FromArgb(119,201,197)},Positions=new[]{0f,.57f,1f}};
+   graphics.FillPath(ribbonFill,ribbon);
+   using var fold=new GraphicsPath(); fold.AddBezier(105,143,105,159,112,167,128,167); fold.AddLine(128,167,184,167); fold.AddLine(184,167,161,193); fold.AddLine(161,193,122,193); fold.AddBezier(122,193,113,193,106,191,100,187); fold.AddBezier(100,187,121,190,133,183,142,173); fold.AddLine(142,173,128,173); fold.AddBezier(128,173,111,173,101,163,105,143); fold.CloseFigure();
+   using var foldFill=new SolidBrush(Color.FromArgb(105,124,205,198)); graphics.FillPath(foldFill,fold);
+   using var gloss = new Pen(Color.FromArgb(115,231,255,249),2){StartCap=LineCap.Round,EndCap=LineCap.Round};
+   using var light = new GraphicsPath(); light.AddLine(24,89,24,76); light.AddBezier(24,76,24,43,42,24,77,24); light.AddLine(77,24,156,24); graphics.DrawPath(gloss,light);
+   using var lower = new Pen(Color.FromArgb(89,146,204,201),2){StartCap=LineCap.Round,EndCap=LineCap.Round};
+   using var edge = new GraphicsPath(); edge.AddLine(166,224,179,224); edge.AddBezier(179,224,207,224,226,205,229,180); graphics.DrawPath(lower,edge);
+   using var bitmap=new Bitmap(size,size,PixelFormat.Format32bppArgb);
+   using(var output=Graphics.FromImage(bitmap)){output.InterpolationMode=InterpolationMode.HighQualityBicubic;output.CompositingMode=CompositingMode.SourceCopy;output.DrawImage(canvas,new Rectangle(0,0,size,size));}
+   if(size==256) bitmap.Save(Path.ChangeExtension(path,".png"),ImageFormat.Png);
    using var stream = new MemoryStream(); bitmap.Save(stream,ImageFormat.Png); images[imageIndex++] = stream.ToArray();
   }
   Directory.CreateDirectory(Path.GetDirectoryName(path)!);
