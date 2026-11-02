@@ -57,7 +57,7 @@ public sealed class DockWindow : Window
         Title = "LumaDock"; WindowStyle = WindowStyle.None; ResizeMode = ResizeMode.NoResize;
         // Only the small Dock is per-pixel transparent: magnified icons can leave
         // the plate without painting an Acrylic rectangle in their flight area.
-        AllowsTransparency = true; Background = Brushes.Transparent; ShowInTaskbar = false; ShowActivated = false; Topmost = true;
+        AllowsTransparency = true; Background = Brushes.Transparent; ShowInTaskbar = false; ShowActivated = false; Topmost = false;
         FontFamily = new FontFamily("Segoe UI Variable Text, Microsoft YaHei UI");
         UseLayoutRounding = true; SnapsToDevicePixels = true;
         scroll.Content = items;
@@ -286,6 +286,7 @@ public sealed class DockWindow : Window
             if (IsVisible) Hide();
         }
         else if (!IsVisible) { Show(); Reposition(); }
+        if (IsVisible && handle != IntPtr.Zero) NativeWindowHelper.ApplyDockLayer(handle);
     }
 
     public void Reposition()
@@ -325,6 +326,7 @@ public sealed class DockWindow : Window
         if (s.Position == "Left") { x = monitor.WorkLeft + gap; y = monitor.WorkTop + (monitor.WorkHeight - h) / 2; }
         if (s.Position == "Right") { x = monitor.WorkLeft + monitor.WorkWidth - w - gap; y = monitor.WorkTop + (monitor.WorkHeight - h) / 2; }
         NativeWindowHelper.SetPosition(handle, x, y, w, h);
+        NativeWindowHelper.ApplyDockLayer(handle);
     }
 
     private void UpdateContour()

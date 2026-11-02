@@ -85,10 +85,24 @@ public static class NativeWindowHelper
         var style = GetWindowLongPtr(hwnd, -20).ToInt64();
         // WS_EX_TOOLWINDOW and WS_EX_NOACTIVATE; do not steal keyboard focus from foreground apps.
         SetWindowLongPtr(hwnd, -20, new IntPtr((style | 0x80 | 0x08000000) & ~0x40000));
-        SetWindowPos(hwnd, new IntPtr(-1), 0, 0, 0, 0, 0x0013);
+        ApplyDockLayer(hwnd);
     }
     public static void SetPosition(IntPtr hwnd, int x, int y, int width, int height) =>
-        SetWindowPos(hwnd, new IntPtr(-1), x, y, width, height, 0x0010);
+        SetWindowPos(hwnd, IntPtr.Zero, x, y, width, height, 0x0014 /* NOACTIVATE | NOZORDER */);
+    public static bool ApplyDockLayer(IntPtr hwnd)
+    {
+        const uint flags = 0x0013; // NOACTIVATE | NOMOVE | NOSIZE.
+        if ((GetWindowLongPtr(hwnd, -20).ToInt64() & 8) != 0
+            && !SetWindowPos(hwnd, new IntPtr(-2), 0, 0, 0, 0, flags)) return false;
+        var foreground = GetForegroundWindow();
+        if (foreground == IntPtr.Zero || foreground == hwnd || !IsWindowVisible(foreground)) return true;
+        var name = new System.Text.StringBuilder(128); GetClassName(foreground, name, name.Capacity);
+        if (name.ToString() is "Progman" or "WorkerW" or "Shell_TrayWnd" or "Shell_SecondaryTrayWnd")
+            return SetWindowPos(hwnd, IntPtr.Zero, 0, 0, 0, 0, flags);
+        // Inserting after a topmost foreground would promote the Dock; keep its normal band.
+        if ((GetWindowLongPtr(foreground, -20).ToInt64() & 8) != 0) return true;
+        return SetWindowPos(hwnd, foreground, 0, 0, 0, 0, flags);
+    }
     public static uint GetDpi(IntPtr hwnd) => GetDpiForWindow(hwnd);
     public static void SetCorners(IntPtr hwnd, bool rounded = true)
     {
@@ -99,6 +113,9 @@ public static class NativeWindowHelper
     [DllImport("user32.dll", EntryPoint = "SetWindowLongPtrW")] private static extern IntPtr SetWindowLongPtr(IntPtr hwnd, int index, IntPtr value);
     [DllImport("user32.dll")] private static extern bool SetWindowPos(IntPtr hwnd, IntPtr after, int x, int y, int width, int height, uint flags);
     [DllImport("user32.dll")] private static extern uint GetDpiForWindow(IntPtr hwnd);
+    [DllImport("user32.dll")] private static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll")] private static extern bool IsWindowVisible(IntPtr hwnd);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetClassName(IntPtr hwnd, System.Text.StringBuilder name, int size);
     [DllImport("dwmapi.dll")] private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attribute, ref int value, int size);
 }
 

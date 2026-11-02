@@ -22,11 +22,15 @@ internal static class Program
     private static readonly List<object> Layouts = [];
     private static readonly List<string> Errors = [];
     private static int exit = 1;
+    private static bool interactiveLayerCheck, layerForegroundVerified;
+    private static string layerReadyPath = "";
     private const BindingFlags Private = BindingFlags.Instance | BindingFlags.NonPublic;
     [STAThread]
     private static int Main(string[] args)
     {
         var report = Path.GetFullPath(args.Length > 1 && args[0] == "--report" ? args[1] : "artifacts/tests/dock-ui-results.json");
+        interactiveLayerCheck = args.Contains("--interactive-layer-check", StringComparer.Ordinal);
+        layerReadyPath = report + ".layer-ready.json";
         var profile = Path.GetFullPath(Path.Combine("work", "dock-ui-tests", Guid.NewGuid().ToString("N")));
         Directory.CreateDirectory(profile); Log.DirectoryPath = Path.Combine(profile, "logs");
         var app = new Application { ShutdownMode = ShutdownMode.OnExplicitShutdown };
@@ -310,13 +314,20 @@ internal static class Program
                     EnableWindow(hwnd, true);
                     try
                     {
+                        // Expose only this owned fixture while checking native input geometry.
+                        // Product defaults and the separate foreground-layer checks stay non-floating.
+                        Require(SetWindowPos(hwnd, new IntPtr(-1), 0, 0, 0, 0, 0x0013), "The owned geometry fixture could not be exposed.");
                         var blank = dock.PointToScreen(new Point(2, 2));
                         var body = Field<Grid>(dock, "body");
                         var painted = body.PointToScreen(new Point(body.ActualWidth / 2, body.ActualHeight / 2));
                         Require(WindowFromPoint(new NativePoint((int)blank.X, (int)blank.Y)) != hwnd, "Transparent flight corner still blocks native hit testing.");
                         Require(WindowFromPoint(new NativePoint((int)painted.X, (int)painted.Y)) == hwnd, "The actual plate is not hit-testable.");
                     }
-                    finally { EnableWindow(hwnd, false); }
+                    finally
+                    {
+                        SetWindowPos(hwnd, new IntPtr(-2), 0, 0, 0, 0, 0x0013);
+                        EnableWindow(hwnd, false); dock.Reposition();
+                    }
                 });
 
                 foreach (var shape in new[] { "Capsule", "Pebble", "Rail" })
@@ -463,6 +474,7 @@ internal static class Program
                     Call(dock, "ScheduleHide");
                     Require(!Field<DispatcherTimer>(dock, "hover").IsEnabled && !Field<DispatcherTimer>(dock, "hideDelay").IsEnabled, "A closed Dock retains a clock.");
                 });
+                await CheckWindowLayering(profile);
                 exit = Errors.Count == 0 ? 0 : 1;
             }
             catch (Exception ex) { Errors.Add(ex.ToString()); }
@@ -470,13 +482,109 @@ internal static class Program
             {
                 if (dock?.IsVisible == true) dock.Close(); controller?.Dispose();
                 Directory.CreateDirectory(Path.GetDirectoryName(report)!);
-                File.WriteAllText(report, JsonSerializer.Serialize(new { measuredAt = DateTimeOffset.Now, passed = Results.Count - Errors.Count(e => e.StartsWith("CHECK:")), total = Results.Count, results = Results, layouts = Layouts, errors = Errors, notes = "Actual WPF Dock with isolated app records; no software was launched and no system settings were written. Four placements, three contours, two hover extremes. This is a geometry/motion lifecycle check, not a physical multi-monitor or frame-rate benchmark." }, new JsonSerializerOptions { WriteIndented = true }));
+                File.WriteAllText(report, JsonSerializer.Serialize(new { measuredAt = DateTimeOffset.Now, passed = Results.Count - Errors.Count(e => e.StartsWith("CHECK:")), failed = Errors.Count, total = Results.Count, interactiveLayerRequested = interactiveLayerCheck, layerForegroundVerified, results = Results, layouts = Layouts, errors = Errors, notes = "Actual WPF Dock with isolated app records; no software was launched and no system settings were written. Native input geometry exposes only its owned test Dock temporarily and restores its normal layer immediately. Foreground Z-order acceptance is reported separately and requires the owned cover to be truly foreground. This is not a physical multi-monitor or frame-rate benchmark." }, new JsonSerializerOptions { WriteIndented = true }));
                 Console.WriteLine($"Dock UI: {Results.Count - Errors.Count(e => e.StartsWith("CHECK:"))}/{Results.Count}; {report}");
                 foreach (var error in Errors) Console.WriteLine(error);
                 app.Shutdown();
             }
         };
         app.Run(); return exit;
+    }
+    private static async Task CheckWindowLayering(string profile)
+    {
+        using var controller = new AppController(Path.Combine(profile, "window-layers"), null);
+        controller.State.Settings.AutoHide = false;
+        controller.State.Settings.Animations = false;
+        var dock = new DockWindow(controller) { ShowActivated = false };
+        var cover = new Window
+        {
+            Title = "LumaDock · 层级验收", Width = 240, Height = 130,
+            WindowStyle = WindowStyle.None, ResizeMode = ResizeMode.NoResize,
+            ShowInTaskbar = interactiveLayerCheck, ShowActivated = false, Background = Brushes.DimGray
+        };
+        try
+        {
+            dock.SourceInitialized += (_, _) => EnableWindow(new WindowInteropHelper(dock).Handle, false);
+            dock.Show(); await Frame();
+            var dockHandle = new WindowInteropHelper(dock).Handle;
+            Check("A default Dock has neither managed nor native topmost state", () =>
+                Require(!dock.Topmost && !IsTopmost(dockHandle), "The default Dock still occupies the native topmost band."));
+            cover.Left = dock.Left + 15; cover.Top = dock.Top + 15;
+            cover.Show(); await Frame();
+            var coverHandle = new WindowInteropHelper(cover).Handle;
+            if (interactiveLayerCheck && GetForegroundWindow() != coverHandle)
+            {
+                var activated = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                void Activated(object? sender, EventArgs e) { if (GetForegroundWindow() == coverHandle) activated.TrySetResult(); }
+                cover.Activated += Activated;
+                try
+                {
+                    Directory.CreateDirectory(Path.GetDirectoryName(layerReadyPath)!);
+                    File.WriteAllText(layerReadyPath, JsonSerializer.Serialize(new { processId = Environment.ProcessId, windowTitle = cover.Title, waitingForOwnedWindowActivation = true }));
+                    Console.WriteLine("Layer fixture ready: activate its owned window '" + cover.Title + "'.");
+                    if (GetForegroundWindow() != coverHandle) await Task.WhenAny(activated.Task, Task.Delay(TimeSpan.FromSeconds(90)));
+                }
+                finally { cover.Activated -= Activated; }
+            }
+            var fixtureIsForeground = GetForegroundWindow() == coverHandle;
+            if (interactiveLayerCheck)
+                Check("The owned ordinary cover is genuinely foreground before checking Z-order", () =>
+                    Require(fixtureIsForeground && !dock.IsActive, "The owned cover was not activated; foreground-layer acceptance cannot be claimed."));
+            layerForegroundVerified = fixtureIsForeground;
+            foreach (var position in new[] { "Bottom", "Top", "Left", "Right" })
+            {
+                controller.State.Settings.Position = position;
+                dock.UpdateSettings(); await Frame();
+                Check(position + " relayout preserves the ordinary Dock layer", () =>
+                {
+                    Require(!dock.Topmost && !IsTopmost(dockHandle), "Relayout silently enabled topmost state.");
+                    if (fixtureIsForeground)
+                    {
+                        Require(IsAbove(coverHandle, dockHandle), "The Dock moved above the ordinary foreground cover.");
+                        Require(GetForegroundWindow() == coverHandle, "Relayout stole keyboard focus.");
+                    }
+                });
+            }
+            dock.RefreshWindows(); await Frame();
+            Check("Refreshing application state does not raise the Dock or take focus", () =>
+            {
+                Require(!dock.Topmost && !IsTopmost(dockHandle), "Application refresh silently enabled topmost state.");
+                if (fixtureIsForeground) Require(IsAbove(coverHandle, dockHandle) && GetForegroundWindow() == coverHandle,
+                    "Application refresh covered the foreground window or took focus.");
+            });
+            dock.Rebuild(); await Frame();
+            Check("Rebuilding the Dock retains its ordinary native layer", () =>
+            {
+                Require(!dock.Topmost && !IsTopmost(dockHandle), "Rebuild silently enabled topmost state.");
+                if (fixtureIsForeground) Require(IsAbove(coverHandle, dockHandle) && GetForegroundWindow() == coverHandle,
+                    "Rebuild covered the foreground window or took focus.");
+            });
+            SetWindowPos(dockHandle, new IntPtr(-1), 0, 0, 0, 0, 0x0013);
+            var wasTopmost = IsTopmost(dockHandle);
+            dock.Reposition(); await Frame();
+            Check("Relayout clears a stale native topmost bit instead of keeping it", () =>
+            {
+                Require(wasTopmost && !dock.Topmost && !IsTopmost(dockHandle), "The ordinary layer did not clear stale native topmost state.");
+                if (fixtureIsForeground) Require(IsAbove(coverHandle, dockHandle) && GetForegroundWindow() == coverHandle,
+                    "Restoring the normal layer covered the foreground window or took focus.");
+            });
+            dock.Close(); await Frame();
+            Check("The layer-only update adds no clock that survives closing", () =>
+                Require(!Field<DispatcherTimer>(dock, "hover").IsEnabled && !Field<DispatcherTimer>(dock, "hideDelay").IsEnabled,
+                    "Closing the normal-layer Dock retained a timer."));
+        }
+        finally { cover.Close(); if (dock.IsVisible) dock.Close(); await Frame(); }
+    }
+    private static bool IsTopmost(IntPtr handle) => (GetWindowLongPtr(handle, -20).ToInt64() & 8) != 0;
+    private static bool IsAbove(IntPtr upper, IntPtr lower)
+    {
+        var seen = new HashSet<IntPtr>();
+        for (var window = GetTopWindow(IntPtr.Zero); window != IntPtr.Zero && seen.Add(window); window = GetWindow(window, 2))
+        {
+            if (window == upper) return true;
+            if (window == lower) return false;
+        }
+        return false;
     }
     private static void Check(string name, Action action)
     {
@@ -579,6 +687,10 @@ internal static class Program
     private static async Task Frame() { await Dispatcher.Yield(DispatcherPriority.ContextIdle); await Task.Delay(70); await Dispatcher.Yield(DispatcherPriority.ContextIdle); }
     private static async Task Settle() { await Task.Delay(600); await Dispatcher.Yield(DispatcherPriority.ContextIdle); }
     [DllImport("user32.dll")] private static extern bool EnableWindow(IntPtr hwnd, bool enabled);
+    [DllImport("user32.dll")] private static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll")] private static extern IntPtr GetTopWindow(IntPtr hwnd);
+    [DllImport("user32.dll")] private static extern IntPtr GetWindow(IntPtr hwnd, uint command);
+    [DllImport("user32.dll")] private static extern bool SetWindowPos(IntPtr hwnd, IntPtr after, int x, int y, int width, int height, uint flags);
     [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")] private static extern IntPtr GetWindowLongPtr(IntPtr hwnd, int index);
     [StructLayout(LayoutKind.Sequential)] private readonly record struct NativePoint(int X, int Y);
     [DllImport("user32.dll")] private static extern IntPtr WindowFromPoint(NativePoint point);

@@ -4,18 +4,18 @@
 
 <p align="center"><b>把常用应用留在顺手的位置。</b></p>
 <p align="center">
-  <a href="https://github.com/FouHe0720/LumaDock/releases"><img src="https://img.shields.io/github/v/release/FouHe0720/LumaDock?include_prereleases&label=Release&color=588e9d&style=flat-square" alt="Release"></a>
+  <a href="https://github.com/FouHe0720/LumaDock/releases/tag/v0.10.2"><img src="https://img.shields.io/badge/Release-0.10.2-588e9d?style=flat-square" alt="Release 0.10.2"></a>
   <img src="https://img.shields.io/badge/Windows-10%20%2F%2011%20x64-53798a?style=flat-square" alt="Windows 10 / 11 x64">
   <a href="https://github.com/FouHe0720/LumaDock/actions/workflows/build.yml"><img src="https://github.com/FouHe0720/LumaDock/actions/workflows/build.yml/badge.svg" alt="Windows build"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-7c8b82?style=flat-square" alt="MIT License"></a>
 </p>
 <p align="center">
-  <a href="https://github.com/FouHe0720/LumaDock/releases/download/v0.10.1/LumaDock-0.10.1-win-x64.zip"><img src="https://img.shields.io/badge/Download%200.10.1-Windows%20x64-3d7f84?style=for-the-badge" alt="下载 LumaDock 0.10.1 Windows 便携版"></a>
+  <a href="https://github.com/FouHe0720/LumaDock/releases/download/v0.10.2/LumaDock-0.10.2-win-x64.zip"><img src="https://img.shields.io/badge/Download%200.10.2-Windows%20x64-3d7f84?style=for-the-badge" alt="下载 LumaDock 0.10.2 Windows 便携版"></a>
 </p>
 <p align="center">完整解压即可运行 · 无需额外安装 .NET · Windows 11 推荐 · 预发布</p>
 <p align="center">
   <a href="docs/USER-GUIDE.md">使用指南</a> ·
-  <a href="https://github.com/FouHe0720/LumaDock/releases/tag/v0.10.1">版本说明</a> ·
+  <a href="https://github.com/FouHe0720/LumaDock/releases/tag/v0.10.2">版本说明</a> ·
   <a href="docs/DEVELOPMENT.md">开发文档</a>
 </p>
 
@@ -23,7 +23,7 @@ LumaDock 是一款原生 Windows Dock 与应用管理器。常用软件放进悬
 
 ![LumaDock 0.10.0 应用列表](docs/assets/library010.png)
 
-<p align="center"><sub>0.10.0 的真实应用列表，0.10.1 沿用这一布局；使用系统应用、隔离配置与原创示例背景。</sub></p>
+<p align="center"><sub>0.10.0 的真实应用列表，当前版本沿用这一布局；使用系统应用、隔离配置与原创示例背景。</sub></p>
 
 <table>
   <tr>
@@ -52,7 +52,11 @@ LumaDock 是一款原生 Windows Dock 与应用管理器。常用软件放进悬
 
 **偏好设置 → 材质 → Dock 浓度** 现在可调为 **2–100%**，默认 70%。数值越低越通透，图标本身保持清楚。图标大小、间距也在材质设置中调整。
 
-新加入 **图标鲜艳度**：在 Dock 设置中提亮图标、增加色彩，倒影跟随同样的颜色。默认 28%，设为 0% 保留原色；只改变 Dock 内的显示，不修改图标文件。
+**图标鲜艳度**可在 Dock 设置中调整：提亮图标、增加色彩，倒影跟随同样的颜色。默认 28%，设为 0% 保留原色；只改变 Dock 内的显示，不修改图标文件。
+
+## 打开应用时，Dock 留在下方
+
+0.10.2 只调整 Dock 的窗口层级。打开或切换到其他软件时，应用保持在 Dock 上方；刷新列表、改变位置或显示器也不会将 Dock 重新置顶。返回桌面继续使用 Dock，或按 **Ctrl + Alt + Space** 打开应用列表。
 
 ## 玻璃随画面一起变化
 
@@ -79,7 +83,7 @@ LumaDock 是一款原生 Windows Dock 与应用管理器。常用软件放进悬
 
 ## 三步开始
 
-1. [下载 Windows 便携版](https://github.com/FouHe0720/LumaDock/releases/download/v0.10.1/LumaDock-0.10.1-win-x64.zip)，**完整解压**到准备长期保留的可写文件夹。
+1. [下载 Windows 便携版](https://github.com/FouHe0720/LumaDock/releases/download/v0.10.2/LumaDock-0.10.2-win-x64.zip)，**完整解压**到准备长期保留的可写文件夹。
 2. 双击 **LumaDock.exe**，等待首次扫描。便携包包含 .NET Desktop Runtime，无需安装 SDK、IDE、字体包或主题软件。
 3. 按 **Ctrl + Alt + Space** 打开应用；右键应用 → **固定到 Dock**。未扫描的软件可通过“添加应用”选择程序或快捷方式。
 
@@ -91,6 +95,7 @@ LumaDock 是一款原生 Windows Dock 与应用管理器。常用软件放进悬
 | 想做什么 | 从这里开始 |
 | --- | --- |
 | 打开应用 | 点击 Dock 左端 L 图标，或按 **Ctrl + Alt + Space** |
+| Dock 被工作窗口遮住 | 返回桌面使用 Dock，或按 **Ctrl + Alt + Space** 打开应用列表 |
 | 把应用插到中间 | 拖到 Dock 的目标位置，看到插入标记后松开 |
 | 把 Dock 应用放到桌面 | 拖到 Windows 桌面，创建快捷方式，固定状态保留 |
 | 栏目与排序 | 新建栏目，拖到栏目标签或右键放入；栏目可随时改名或删除 |
@@ -120,12 +125,9 @@ LumaDock 是一款原生 Windows Dock 与应用管理器。常用软件放进悬
 
 倒影直接复用当前图标图像，不为镜像再生成一份位图。鲜艳度在图标加载或设置改变后处理并缓存，空闲时不重复计算。悬停、反光与输入光标按各自事件更新，静止时不维持动画循环。
 
-| 0.10.1 Dock 静置实测 | 平均 CPU（全机） | 私有工作集峰值 |
-| --- | ---: | ---: |
-| 预热 30 秒，采样 60 秒 | 0.1846% | 54.0 MB |
-| 预热 120 秒，采样 60 秒 | 0.0065% | 51.4 MB |
+0.10.2 已完成 **247 项组件与原生界面检查**，以及 **100 次窗口开合与搜索**。原生层级检查覆盖四边重定位、刷新与重建，确认前台应用保持在 Dock 上方，键盘焦点也保留在工作窗口。[查看验证记录](docs/validation.md)
 
-Windows 11、16 个逻辑处理器，6 个真实固定应用；倒影 72%、底座浓度 4%、鲜艳度 50%。两轮均保留：首轮出现一次采样 CPU 1.6437%，原因尚未量化判定。本次只测 Dock 静置，不代表持续悬停、GPU 或长期驻留；完整数据与历史前台记录见 [性能记录](docs/performance.md)。
+资源数据按实际运行状态记录。最新一轮包含已创建主界面的后台静置，采样期间应用未处于前台；它不是纯 Dock 基线，也不能与旧版纯 Dock 数据直接比较。完整数值、二进制哈希与历史记录见 [性能记录](docs/performance.md)。
 
 当前为预发布版本。目标为 Windows 10 / 11 x64，推荐 Windows 11；已验证环境、跨桌面鼠标操作与混合 DPI 等边界见 [验证范围](docs/validation.md)。
 
@@ -146,7 +148,7 @@ SDK 版本、安装方式、项目结构及完整测试命令见 [开发文档](
 
 ## 文档与反馈
 
-[完整使用指南](docs/USER-GUIDE.md) · [字体与文字](docs/SYSTEM-FONTS.md) · [版本说明](docs/RELEASE-0.10.1.md) · [性能记录](docs/performance.md) · [开发文档](docs/DEVELOPMENT.md)
+[完整使用指南](docs/USER-GUIDE.md) · [字体与文字](docs/SYSTEM-FONTS.md) · [版本说明](docs/RELEASE-0.10.2.md) · [性能记录](docs/performance.md) · [开发文档](docs/DEVELOPMENT.md)
 
 配置与日志保存在 `%LOCALAPPDATA%\LumaDock`，不主动上传。启用开机启动或改变桌面图标显示时会单独确认。
 
