@@ -243,6 +243,8 @@ internal static class Program
             }
         });
 
+        WindowActionChecks.Run(Check, Require);
+
         var failed = results.Count(result => !result.Passed);
         var reportIndex = Array.IndexOf(args, "--report");
         var reportPath = reportIndex >= 0 && reportIndex + 1 < args.Length ? args[reportIndex + 1] :
@@ -254,6 +256,7 @@ internal static class Program
             recordedAtUtc = DateTimeOffset.UtcNow,
             platform = "Windows x64 interactive session",
             readOnlySystemChecks = true,
+            windowActionsUseOwnedFixturesOnly = true,
             shortcutChecksUsePrivateFixtureDirectory = true,
             elapsedMs = total.Elapsed.TotalMilliseconds,
             passed = results.Count - failed,

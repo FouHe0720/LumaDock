@@ -28,6 +28,9 @@ public sealed class AppController : IDisposable
     private Stopwatch? centerClock;
     public AppState State { get; private set; }
     internal bool IsDisposed => disposed;
+    private DockSystemContext? systemContext;
+    internal DockSystemContext SystemContext => systemContext ??= new();
+    internal void ReleaseSystemContext() { var current = systemContext; systemContext = null; current?.Dispose(); }
     public event EventHandler? Changed;
     public DesktopFontInfo SystemIconFont => desktopFont.Current;
     public DesktopFontInfo NameFont => State.Settings.FollowSystemIconFont ? desktopFont.Current
@@ -154,6 +157,21 @@ public sealed class AppController : IDisposable
     { var selected = PrepareApplicationPin(app, ref gap); DockOrder.InsertAtGap(State.PinnedIds, [selected], gap); Save(); }
     public void Unpin(AppEntry app)
     { var ids = ApplicationEntries(app).Select(entry => entry.Id).ToHashSet(StringComparer.OrdinalIgnoreCase); State.PinnedIds.RemoveAll(ids.Contains); Save(); }
+    public void PinRunning(AppEntry running)
+    {
+        try
+        {
+            if (!RunningApps.CanPin(running)) { Notify("此窗口没有可单独固定的启动入口。"); return; }
+            if (running.Source != "Running") { Pin(running); return; }
+            if (running.LaunchPath.StartsWith("shell:AppsFolder\\", StringComparison.OrdinalIgnoreCase) && running.AppUserModelId.Contains('!'))
+            {
+                var found = new AppEntry { Id = Catalog.StableId("manual:" + running.LaunchPath), Name = running.Name, Source = "Manual", LaunchPath = running.LaunchPath, AppUserModelId = running.AppUserModelId, ExecutablePath = running.ExecutablePath, IsAvailable = true };
+                Catalog.Merge(State, [found]); Pin(Catalog.FindEquivalent(State, found) ?? found);
+            }
+            else Pin(GetOrAddManual(running.LaunchPath));
+        }
+        catch (Exception error) { Log.Write("Pin running application failed", error); Notify("此窗口暂时无法固定，请从应用库添加。"); }
+    }
     public void SetCustomIcon(AppEntry app, string? path)
     {
         var normalized = Catalog.NormalizeIconPath(path);
@@ -310,7 +328,7 @@ public sealed class AppController : IDisposable
         Tracker.Changed -= WindowsChanged; Tracker.Dispose(); icons.Dispose();
         if (messages != null) { Native.UnregisterHotKey(messages.Handle, 1); messages.Dispose(); }
         if (tray != null) { tray.Visible = false; tray.ContextMenuStrip?.Dispose(); tray.Icon?.Dispose(); tray.Dispose(); }
-        dock?.Close(); center?.ClosePermanently();
+        dock?.Close(); center?.ClosePermanently(); systemContext?.Dispose();
     }
     private static class Native
     {

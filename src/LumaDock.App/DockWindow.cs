@@ -26,12 +26,18 @@ public sealed class DockWindow : Window
     private readonly GlassRim highlight = new() { Margin = new Thickness(1), DrawStaticEdge = false };
     private readonly LiquidGlassSurface liquid;
     private readonly StackPanel items = new();
+    private readonly Grid lane = new();
+    private DockSystemStrip? systemStrip;
+    private bool pendingSystemRebuild;
+    private readonly List<string> runningOrder = [];
+    private string runningSignature = "";
     private readonly ScrollViewer scroll = new() { HorizontalScrollBarVisibility = ScrollBarVisibility.Hidden, VerticalScrollBarVisibility = ScrollBarVisibility.Disabled, CanContentScroll = false };
     private readonly Canvas dropOverlay = new() { IsHitTestVisible = false };
     private readonly Border insertionCue = new() { CornerRadius = new CornerRadius(2), Visibility = Visibility.Collapsed, BorderThickness = new Thickness(1) };
     private sealed class Tile
     {
         public AppEntry? App; public IReadOnlyList<AppEntry> Variants = []; public required Button Button; public required FrameworkElement Visual;
+        public bool Transient; public string RunningKey = ""; public IReadOnlyList<RunningWindow> RunningWindows = [];
         public required ScaleTransform Scale; public required TranslateTransform Move;
         public required Border Halo; public required Ellipse Dot; public required DockReflection Reflection;
         public double TargetScale = 1, TargetAlong, TargetLift, TargetHalo;
@@ -63,7 +69,8 @@ public sealed class DockWindow : Window
         scroll.Content = items;
         body.Children.Add(liquid); body.Children.Add(tint); body.Children.Add(highlight);
         dropOverlay.Children.Add(insertionCue);
-        var surface = new Grid(); surface.Children.Add(plate); surface.Children.Add(body); surface.Children.Add(finish); surface.Children.Add(scroll); surface.Children.Add(dropOverlay); Content = surface;
+        lane.Children.Add(scroll);
+        var surface = new Grid(); surface.Children.Add(plate); surface.Children.Add(body); surface.Children.Add(finish); surface.Children.Add(lane); surface.Children.Add(dropOverlay); Content = surface;
         body.SizeChanged += (_, _) => UpdateContour();
         hover.Tick += HoverTick;
         PreviewMouseWheel += (_, e) => { if (Vertical) scroll.ScrollToVerticalOffset(scroll.VerticalOffset - e.Delta); else scroll.ScrollToHorizontalOffset(scroll.HorizontalOffset - e.Delta); e.Handled = true; };
@@ -75,7 +82,7 @@ public sealed class DockWindow : Window
         MouseMove += Magnify;
         MouseEnter += (_, _) => { hideDelay.Stop(); Reveal(); };
         MouseLeave += (_, _) => { lastPointer = new(double.NaN, double.NaN); highlight.ReleasePointer(); ResetMagnification(); if (controller.State.Settings.AutoHide) hideDelay.Start(); };
-        IsVisibleChanged += (_, _) => { if (!IsVisible) StopHover(); };
+        IsVisibleChanged += (_, _) => { if (!IsVisible) StopHover(); systemStrip?.SetVisible(IsVisible && !tucked); };
         hideDelay.Tick += HideTick;
         SourceInitialized += (_, _) =>
         {
@@ -85,7 +92,7 @@ public sealed class DockWindow : Window
         };
         Loaded += (_, _) => { UpdateSettings(); if (controller.State.Settings.AutoHide) hideDelay.Start(); };
         ContentRendered += (_, _) => controller.RecordDockFrame();
-        Closed += (_, _) => { closed = true; ClearInsertion(); StopHover(); hover.Tick -= HoverTick; highlight.StopMotion(); hideDelay.Stop(); hideDelay.Tick -= HideTick; source?.RemoveHook(WndProc); generation++; };
+        Closed += (_, _) => { closed = true; DisposeSystemStrip(); ClearInsertion(); StopHover(); hover.Tick -= HoverTick; highlight.StopMotion(); hideDelay.Stop(); hideDelay.Tick -= HideTick; source?.RemoveHook(WndProc); generation++; };
         ContextMenu = new ContextMenu();
         ContextMenu.Closed += (_, _) => ScheduleHide();
         AddMenu(ContextMenu, "打开应用", () => controller.ShowCenter());
@@ -126,17 +133,22 @@ public sealed class DockWindow : Window
     {
         if (closed) return;
         if (dragging) { rebuildAfterDrag = true; return; }
+        if (systemStrip?.IsInteracting == true) { pendingSystemRebuild = true; return; }
         if (rebuilding) return;
         rebuilding = true;
         try
         {
             StopHover();
             ClearInsertion();
+            DisposeSystemStrip();
+            lane.Children.Clear(); lane.ColumnDefinitions.Clear(); lane.RowDefinitions.Clear(); lane.Children.Add(scroll);
+            Grid.SetColumn(scroll, 0); Grid.SetRow(scroll, 0);
             var version = ++generation;
             tiles.Clear(); items.Children.Clear(); items.Orientation = Vertical ? Orientation.Vertical : Orientation.Horizontal;
             scroll.HorizontalScrollBarVisibility = Vertical ? ScrollBarVisibility.Disabled : ScrollBarVisibility.Hidden;
             scroll.VerticalScrollBarVisibility = Vertical ? ScrollBarVisibility.Hidden : ScrollBarVisibility.Disabled;
             var s = controller.State.Settings;
+            if (!s.DockSystemEnabled) controller.ReleaseSystemContext();
             bodyThickness = s.IconSize + (s.DockShape == "Rail" ? 36 : 42);
             flight = Math.Ceiling(s.IconSize * s.AnimationStrength * .76) + 8;
             endReserve = Math.Ceiling(s.IconSize * s.AnimationStrength * .66) + 9;
@@ -159,7 +171,7 @@ public sealed class DockWindow : Window
                 var image = new System.Windows.Controls.Image { Width = s.IconSize, Height = s.IconSize, Stretch = Stretch.Uniform, IsHitTestVisible = false };
                 RenderOptions.SetBitmapScalingMode(image, BitmapScalingMode.HighQuality);
                 var tile = AddTile(app, image); tile.Variants = group.Entries; var button = tile.Button;
-                button.Click += (_, _) => controller.Launch(app);
+                button.Click += (_, _) => ActivateTile(tile);
                 button.PreviewMouseLeftButtonDown += (_, e) => dragStart = e.GetPosition(this);
                 button.PreviewMouseMove += (_, e) => BeginReorder(button, app, e);
                 button.ContextMenu = new ContextMenu();
@@ -182,13 +194,108 @@ public sealed class DockWindow : Window
                 AddMenu(button.ContextMenu, "更换图标…", () => controller.ChooseIcon(app, this));
                 if (!string.IsNullOrEmpty(app.CustomIconPath)) AddMenu(button.ContextMenu, "恢复原图标", () => controller.SetCustomIcon(app, ""));
                 AddMenu(button.ContextMenu, "从 Dock 移除", () => controller.Unpin(app));
+                AddWindowCommands(button.ContextMenu, tile);
                 _ = LoadIcon(image, app, version);
+            }
+            var running = OrderedRunningApps();
+            runningSignature = string.Join("\n", running.Select(group => group.IdentityKey));
+            foreach (var group in running)
+            {
+                var image = new System.Windows.Controls.Image { Width = s.IconSize, Height = s.IconSize, Stretch = Stretch.Uniform, IsHitTestVisible = false };
+                var tile = AddTile(group.App, image); tile.Transient = true; tile.RunningKey = group.IdentityKey; tile.RunningWindows = group.Windows;
+                tile.Button.AllowDrop = false; tile.Button.Click += (_, _) => ActivateTile(tile);
+                tile.Button.ContextMenu = new ContextMenu(); tile.Button.ContextMenu.Closed += (_, _) => ScheduleHide();
+                AddWindowCommands(tile.Button.ContextMenu, tile);
+                if (RunningApps.CanPin(group.App)) AddMenu(tile.Button.ContextMenu, "固定到 Dock", () => controller.PinRunning(group.App));
+                _ = LoadRunningIcon(image, tile, version);
+            }
+            if (s.DockSystemEnabled)
+            {
+                systemStrip = new DockSystemStrip(controller, Vertical);
+                systemStrip.InteractionChanged += SystemInteractionChanged;
+                if (Vertical)
+                {
+                    lane.RowDefinitions.Add(new RowDefinition()); lane.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto }); Grid.SetRow(systemStrip, 1);
+                }
+                else
+                {
+                    lane.ColumnDefinitions.Add(new ColumnDefinition()); lane.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto }); Grid.SetColumn(systemStrip, 1);
+                }
+                lane.Children.Add(systemStrip); systemStrip.SetVisible(IsVisible && !tucked);
             }
             RefreshWindows(); Reposition();
         }
         finally { rebuilding = false; }
     }
 
+    private void DisposeSystemStrip()
+    {
+        if (systemStrip == null) return;
+        systemStrip.InteractionChanged -= SystemInteractionChanged; systemStrip.Dispose(); systemStrip = null;
+    }
+    private void SystemInteractionChanged(object? sender, EventArgs e)
+    {
+        if (systemStrip?.IsInteracting == true) { hideDelay.Stop(); return; }
+        if (pendingSystemRebuild) { pendingSystemRebuild = false; Dispatcher.BeginInvoke(() => { if (!closed) Rebuild(); }); }
+        ScheduleHide();
+    }
+
+    private IReadOnlyList<RunningAppGroup> OrderedRunningApps()
+    {
+        var groups = controller.State.Settings.ShowRunningApps ? RunningApps.Project(controller.State, controller.Tracker.Windows) : [];
+        runningOrder.RemoveAll(key => !groups.Any(group => group.IdentityKey == key));
+        foreach (var group in groups) if (!runningOrder.Contains(group.IdentityKey)) runningOrder.Add(group.IdentityKey);
+        return groups.OrderBy(group => runningOrder.IndexOf(group.IdentityKey)).ToArray();
+    }
+    private IReadOnlyList<RunningWindow> TileWindows(Tile tile) => tile.Transient ? tile.RunningWindows : tile.Variants.SelectMany(controller.Tracker.GetWindows).DistinctBy(window => window.Handle).ToArray();
+    private void ActivateTile(Tile tile)
+    {
+        var windows = TileWindows(tile);
+        if (windows.Count > 1)
+        {
+            var menu = new ContextMenu { PlacementTarget = tile.Button, Placement = PlacementMode.Top };
+            foreach (var window in windows) AddMenu(menu, WindowTracker.ReadWindowTitle(window), () => controller.Tracker.ActivateWindow(window));
+            var original = tile.Button.ContextMenu;
+            menu.Closed += (_, _) => { tile.Button.ContextMenu = original; ScheduleHide(); };
+            tile.Button.ContextMenu = menu; menu.IsOpen = true;
+        }
+        else if (windows.Count == 1)
+        {
+            var window = windows[0];
+            var success = controller.Tracker.ForegroundWindow == window.Handle ? controller.Tracker.MinimizeWindow(window) : controller.Tracker.ActivateWindow(window);
+            if (!success) controller.Notify("窗口暂时无法切换，可能已关闭或受权限限制。");
+        }
+        else if (!tile.Transient && tile.App != null) controller.Launch(tile.App);
+    }
+    private void AddWindowCommands(ContextMenu menu, Tile tile)
+    {
+        var list = new MenuItem { Header = "窗口" }; menu.Items.Add(list);
+        list.SubmenuOpened += (_, _) =>
+        {
+            list.Items.Clear();
+            foreach (var window in TileWindows(tile))
+            {
+                var item = new MenuItem { Header = WindowTracker.ReadWindowTitle(window) };
+                AddMenu(item, "切换到窗口", () => controller.Tracker.ActivateWindow(window));
+                AddMenu(item, "最小化", () => controller.Tracker.MinimizeWindow(window));
+                AddMenu(item, "关闭窗口", () => controller.Tracker.CloseWindow(window)); list.Items.Add(item);
+            }
+            if (list.Items.Count == 0) list.Items.Add(new MenuItem { Header = "暂无可切换窗口", IsEnabled = false });
+        };
+    }
+    private static void AddMenu(MenuItem parent, string text, Action action) { var item = new MenuItem { Header = text }; item.Click += (_, _) => action(); parent.Items.Add(item); }
+    private async Task LoadRunningIcon(System.Windows.Controls.Image image, Tile tile, int version)
+    {
+        try
+        {
+            var pixels = Math.Clamp((int)Math.Ceiling(controller.State.Settings.IconSize * 2 * VisualTreeHelper.GetDpi(this).DpiScaleX), 32, 256);
+            var icon = await controller.GetIconAsync(tile.App!, pixels);
+            if (icon == null && tile.RunningWindows.FirstOrDefault() is {} window) icon = await Task.Run(() => WindowTracker.GetWindowIcon(window, pixels));
+            icon ??= await Task.Run(() => WindowTracker.GetGenericWindowIcon(pixels));
+            if (generation == version && !closed) image.Source = icon;
+        }
+        catch (Exception error) { Storage.Log.Write("Running icon unavailable", error); }
+    }
     private async Task LoadIcon(System.Windows.Controls.Image image, AppEntry app, int version)
     {
         try
@@ -280,7 +387,13 @@ public sealed class DockWindow : Window
 
     public void RefreshWindows()
     {
-        foreach (var tile in tiles) tile.Dot.Opacity = tile.App != null && tile.Variants.Any(controller.Tracker.IsRunning) ? .9 : 0;
+        var running = OrderedRunningApps();
+        if (!rebuilding && string.Join("\n", running.Select(group => group.IdentityKey)) != runningSignature) { Rebuild(); return; }
+        foreach (var tile in tiles)
+        {
+            if (tile.Transient) tile.RunningWindows = running.FirstOrDefault(group => group.IdentityKey == tile.RunningKey)?.Windows ?? [];
+            tile.Dot.Opacity = TileWindows(tile).Count > 0 ? .9 : 0;
+        }
         if (controller.Tracker.IsForegroundFullscreenOnMonitor(controller.State.Settings.MonitorDevice))
         {
             if (IsVisible) Hide();
@@ -296,7 +409,7 @@ public sealed class DockWindow : Window
         var monitor = monitors.FirstOrDefault(m => m.DeviceName == controller.State.Settings.MonitorDevice) ?? monitors.FirstOrDefault(m => m.IsPrimary) ?? monitors.First();
         var dpi = Native.GetDpiForWindow(handle) / 96.0; if (dpi < .5) dpi = 1;
         var s = controller.State.Settings;
-        var length = tiles.Count * (s.IconSize + s.Spacing + 12) + (tiles.Count > 1 ? 19 : 0) + 28 + endReserve * 2;
+        var length = tiles.Count * (s.IconSize + s.Spacing + 12) + (tiles.Count > 1 ? 19 : 0) + 28 + endReserve * 2 + (systemStrip?.AlongLength ?? 0);
         var thickness = bodyThickness + flight + 12;
         fullWidth = Vertical ? thickness : Math.Min(length, monitor.WorkWidth / dpi - 16);
         fullHeight = Vertical ? Math.Min(length, monitor.WorkHeight / dpi - 16) : thickness;
@@ -311,7 +424,8 @@ public sealed class DockWindow : Window
             _ => new Thickness(endReserve, flight, endReserve, 12)
         };
         body.Margin = plate.Margin = finish.Margin = margin;
-        items.Margin = tucked ? new Thickness(0) : Vertical ? new Thickness(0, endReserve + 14, 0, endReserve + 14) : new Thickness(endReserve + 14, 0, endReserve + 14, 0);
+        items.Margin = new Thickness(0);
+        lane.Margin = tucked ? new Thickness(0) : Vertical ? new Thickness(0, endReserve + 14, 0, endReserve + 14) : new Thickness(endReserve + 14, 0, endReserve + 14, 0);
         foreach (var layer in new[] { plate, finish })
         {
             layer.Shape = s.DockShape; layer.Radius = radius; layer.Accent = Theme.AccentColor; layer.Dark = Theme.IsDark; layer.Vertical = Vertical; layer.OutwardEnd = s.Position is "Bottom" or "Right"; layer.InvalidateVisual();
@@ -340,14 +454,16 @@ public sealed class DockWindow : Window
     private void HideTick(object? sender, EventArgs e)
     {
         hideDelay.Stop();
-        if (IsMouseOver || dragging || ContextMenu?.IsOpen == true || tiles.Any(t => t.Button.ContextMenu?.IsOpen == true) || !controller.State.Settings.AutoHide) return;
+        if (IsMouseOver || dragging || systemStrip?.IsInteracting == true || ContextMenu?.IsOpen == true || tiles.Any(t => t.Button.ContextMenu?.IsOpen == true) || !controller.State.Settings.AutoHide) return;
         tucked = true; StopHover(); highlight.StopMotion(); scroll.Visibility = Visibility.Collapsed; body.Visibility = Visibility.Collapsed; finish.Visibility = Visibility.Collapsed; Reposition();
+        if (systemStrip != null) { systemStrip.Visibility = Visibility.Collapsed; systemStrip.SetVisible(false); }
     }
     private void ScheduleHide() { if (!closed && IsVisible && controller.State.Settings.AutoHide && !IsMouseOver) hideDelay.Start(); }
     private void Reveal()
     {
         if (!tucked) return;
         tucked = false; scroll.Visibility = Visibility.Visible; body.Visibility = Visibility.Visible; finish.Visibility = Visibility.Visible; Reposition(); liquid.Refresh();
+        if (systemStrip != null) { systemStrip.Visibility = Visibility.Visible; systemStrip.SetVisible(true); }
     }
 
     private void Magnify(object sender, MouseEventArgs e)
@@ -459,7 +575,7 @@ public sealed class DockWindow : Window
     private int InsertionGap(Point point)
     {
         var coordinate = Vertical ? point.Y : point.X;
-        var apps = tiles.Where(tile => tile.App != null).ToArray();
+        var apps = tiles.Where(tile => tile.App != null && !tile.Transient).ToArray();
         for (var i = 0; i < apps.Length; i++)
         {
             var button = apps[i].Button;
@@ -470,7 +586,7 @@ public sealed class DockWindow : Window
     }
     private int SavedInsertionGap(int visibleGap)
     {
-        var apps = tiles.Where(tile => tile.App != null).ToArray();
+        var apps = tiles.Where(tile => tile.App != null && !tile.Transient).ToArray();
         if (apps.Length == 0) return controller.State.PinnedIds.Count;
         // Unavailable pins and alternate launch records stay in the saved list.
         // Resolve the visible gap against its actual saved anchor before applying
@@ -494,7 +610,7 @@ public sealed class DockWindow : Window
     }
     private void ShowInsertionAt(int gap)
     {
-        var apps = tiles.Where(tile => tile.App != null).ToArray();
+        var apps = tiles.Where(tile => tile.App != null && !tile.Transient).ToArray();
         var tile = apps.Length == 0 ? tiles[0] : apps[Math.Clamp(gap, 0, apps.Length - 1)];
         var button = tile.Button;
         var origin = button.TranslatePoint(new Point(), this);

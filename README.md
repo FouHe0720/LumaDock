@@ -2,158 +2,122 @@
   <img src="docs/assets/cover.svg" alt="LumaDock — 原生 Windows Dock 与应用管理" width="100%">
 </p>
 
-<p align="center"><b>把常用应用留在顺手的位置。</b></p>
+<p align="center"><b>常用应用与系统控制，都在顺手的位置。</b></p>
 <p align="center">
-  <a href="https://github.com/FouHe0720/LumaDock/releases/tag/v0.10.2"><img src="https://img.shields.io/badge/Release-0.10.2-588e9d?style=flat-square" alt="Release 0.10.2"></a>
+  <a href="https://github.com/FouHe0720/LumaDock/releases/tag/v0.12.0"><img src="https://img.shields.io/badge/Release-0.12.0-588e9d?style=flat-square" alt="Release 0.12.0"></a>
   <img src="https://img.shields.io/badge/Windows-10%20%2F%2011%20x64-53798a?style=flat-square" alt="Windows 10 / 11 x64">
   <a href="https://github.com/FouHe0720/LumaDock/actions/workflows/build.yml"><img src="https://github.com/FouHe0720/LumaDock/actions/workflows/build.yml/badge.svg" alt="Windows build"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-7c8b82?style=flat-square" alt="MIT License"></a>
 </p>
 <p align="center">
-  <a href="https://github.com/FouHe0720/LumaDock/releases/download/v0.10.2/LumaDock-0.10.2-win-x64.zip"><img src="https://img.shields.io/badge/Download%200.10.2-Windows%20x64-3d7f84?style=for-the-badge" alt="下载 LumaDock 0.10.2 Windows 便携版"></a>
+  <a href="https://github.com/FouHe0720/LumaDock/releases/download/v0.12.0/LumaDock-0.12.0-win-x64.zip"><img src="https://img.shields.io/badge/Download-Windows%20x64-3d7f84?style=for-the-badge" alt="下载 LumaDock Windows 便携版"></a>
 </p>
-<p align="center">完整解压即可运行 · 无需额外安装 .NET · Windows 11 推荐 · 预发布</p>
+<p align="center">完整解压即可运行 · 自带 .NET Runtime · 无需管理员权限 · 预发布</p>
 <p align="center">
   <a href="docs/USER-GUIDE.md">使用指南</a> ·
-  <a href="https://github.com/FouHe0720/LumaDock/releases/tag/v0.10.2">版本说明</a> ·
-  <a href="docs/DEVELOPMENT.md">开发文档</a>
+  <a href="docs/RELEASE-0.12.0.md">本次更新</a> ·
+  <a href="docs/DEVELOPMENT.md">开发文档</a> ·
+  <a href="docs/performance.md">性能记录</a>
 </p>
 
-LumaDock 是一款原生 Windows Dock 与应用管理器。常用软件放进悬浮 Dock，其他入口集中在“应用”里。栏目由自己新建，倒影、玻璃、轮廓、配色和文字也可按习惯调整。
+LumaDock 是一款原生 Windows Dock 与应用管理器。图标映在通透的底座上，指针经过时轻轻放大；应用库负责查找，桌面集保留熟悉的桌面入口。音量、亮度、输入方式和日期时间也能从 Dock 打开。
 
-![LumaDock 0.10.0 应用列表](docs/assets/library010.png)
-
-<p align="center"><sub>0.10.0 的真实应用列表，当前版本沿用这一布局；使用系统应用、隔离配置与原创示例背景。</sub></p>
+![LumaDock 0.12.0：通透倒影、应用与系统状态区](docs/assets/dock012.jpg)
 
 <table>
   <tr>
-    <td width="33%" valign="top"><b>常用应用，一步就到</b><br><br>悬停放大、真实运行指示、四边停靠。拖到插入标记处，放进任意两个图标之间。</td>
-    <td width="33%" valign="top"><b>一个列表，栏目自选</b><br><br>重复入口合并，同一应用的启动方式收进右键菜单。栏目可以随时新建、改名或删除。</td>
-    <td width="33%" valign="top"><b>外观由你决定</b><br><br>更清楚的倒影、更通透的底座，还能调节图标鲜艳度。三种轮廓、六款强调色，字体和文字颜色也可自选。</td>
+    <td width="33%" valign="top"><b>应用，伸手就到</b><br><br>固定、拖排、悬停放大与窗口切换。正在运行的应用临时加入，关闭窗口后退出。</td>
+    <td width="33%" valign="top"><b>控制，集中在一处</b><br><br>独立的输入模式与键盘布局入口；网络、声音、电源合成一个区域，点击展开快捷控制。</td>
+    <td width="33%" valign="top"><b>外观，按自己的习惯</b><br><br>三种轮廓、六款配色，自选玻璃浓度、倒影、字体与文字颜色。系统区的大小、粗细也可单独调整。</td>
   </tr>
 </table>
 
-## 让 Dock 有自己的轮廓
+## 0.12 · Dock 多了一点从容
 
-圆润的胶囊、交错的卵石、利落的轨道。图标映在通透的底座上；指针经过时，当前图标放大并轻轻抬起，相邻图标随之让位，倒影一起变化。停稳后，动画收住。
+Dock 尾部从左到右安排了五组入口：
 
-<table>
-  <tr>
-    <td width="50%" align="center"><img src="docs/assets/dock0101-dark.jpg" alt="0.10.1 深色 Dock，通透底座与清楚的图标倒影" width="100%"><br><sub>深色 · 通透倒影</sub></td>
-    <td width="50%" align="center"><img src="docs/assets/dock0101-light.jpg" alt="0.10.1 浅色 Dock，真实悬停放大与图标倒影" width="100%"><br><sub>浅色 · 通透倒影</sub></td>
-  </tr>
-</table>
+| 入口 | 点击后 |
+| --- | --- |
+| 后台应用箭头 | 打开 Windows 原生后台托盘，使用真实应用菜单 |
+| 中／英 | 对支持的输入法切换当前窗口的中文、英文输入模式 |
+| 拼等布局标识 | 选择实际安装的输入法或键盘布局 |
+| 网络 · 声音 · 电源 | 展开玻璃快捷控制，调整音量、静音与支持的内置屏幕亮度 |
+| 时间与日期 | 打开月历、通知中心或日期时间设置 |
 
-<p align="center"><sub>0.10.1 发布程序集的真实 Dock：倒影 72% · 底座浓度 4% · 图标鲜艳度 50%。系统图标，独立示例背景。</sub></p>
+快捷控制也提供开始、搜索、任务视图、显示桌面和任务管理器入口。WLAN、蓝牙及系统完整快捷设置交由 Windows 打开，实际开关由系统处理。
 
-将桌面程序或快捷方式拖入 Dock，可直接选择插入位置；将 Dock 图标拖到 Windows 桌面，会创建真实快捷方式。原文件和 Dock 固定状态保留，需要取消固定时右键移除。
+<p align="center"><img src="docs/assets/quick012.jpg" alt="0.12.0 快捷控制实拍：真实内置屏幕亮度、音量与系统入口" width="360"></p>
 
-轮廓、位置、显示器、悬停幅度与倒影，在 **偏好设置 → Dock** 中调整。倒影强度可调至 **85%**，渐隐范围更长，悬停时也更清楚；省电与高对比度模式暂时关闭倒影。
+恢复的 **应用库／桌面集** 分工明确：应用库包含已发现与手动添加的程序；桌面集筛选当前仍存在的桌面快捷方式。两页共用整理记录，同一应用的不同启动方式放进右键菜单。栏目继续由自己新建、重命名和删除。
 
-**偏好设置 → 材质 → Dock 浓度** 现在可调为 **2–100%**，默认 70%。数值越低越通透，图标本身保持清楚。图标大小、间距也在材质设置中调整。
+![LumaDock 0.12.0 应用库与桌面集导航](docs/assets/library012.jpg)
+<p align="center"><sub>0.12.0 Windows 实际界面 · 系统应用、隔离配置与原创示例背景。设备状态和输入标识随实际环境变化。</sub></p>
 
-**图标鲜艳度**可在 Dock 设置中调整：提亮图标、增加色彩，倒影跟随同样的颜色。默认 28%，设为 0% 保留原色；只改变 Dock 内的显示，不修改图标文件。
+Dock 保留普通窗口层级：打开其他软件时，工作窗口在上方。返回桌面使用 Dock，或按 **Ctrl + Alt + Space** 打开应用库。
 
-## 打开应用时，Dock 留在下方
+## 通透底座，清楚倒影
 
-0.10.2 只调整 Dock 的窗口层级。打开或切换到其他软件时，应用保持在 Dock 上方；刷新列表、改变位置或显示器也不会将 Dock 重新置顶。返回桌面继续使用 Dock，或按 **Ctrl + Alt + Space** 打开应用列表。
+圆润的胶囊、交错的卵石、利落的轨道。悬停时，当前图标放大并抬起，相邻图标随之让位；倒影跟着变化，停稳后动画收住。
 
-## 玻璃随画面一起变化
+在偏好设置中，可以把底座浓度调低至 **2%**、倒影调高至 **85%**，再按壁纸明暗调整图标鲜艳度。清透背景使用系统合成，后方动态画面随之变化。也可以选择磨砂、静态材质，或减少玻璃流动。
 
-默认 **动态透景 · 清透** 直接使用系统合成，后方动态壁纸随画面变化，保留玻璃边缘与短暂流光。喜欢更柔和的背景，可以切换磨砂；希望细节更清楚，可以调整窗口浓度。
-
-**潮蓝 · 青瓷 · 琥珀 · 烟紫 · 玫瑰 · 石墨**，六款强调色用于按钮、选中状态与边缘反光。深浅主题、玻璃流动和界面动画可以分别选择。
-
-在 **偏好设置 → 材质** 调整。动态模式不循环截取壁纸；静态折射按窗口事件取样。效果与系统支持条件见 [材质说明](docs/WINDOW-BACKDROP.md)。
-
-## 字体清楚，读起来舒服
-
-沿用 Windows 图标字体，或单独选择字体、名称字号、加粗与斜体。侧栏、栏目、标题和应用名称同步字体与粗细，各自保留合适的字号；大字号名称会自动调整网格密度。
-
-文字颜色可以跟随主题、选择色板，也可以输入自己的十六进制色值。所有选项只影响 LumaDock。
-
-<details>
-<summary><b>查看字体与文字配色设置</b></summary>
-
-字体、字号、粗细与颜色在同一处预览，修改后保存；也可以随时切回系统字体。
-
-打开 **偏好设置 → 字体与文字**。沿用系统设置时保持“跟随 Windows 图标字体”开启；选择独立样式时关闭它，修改后即可预览并保存。[详细范围](docs/SYSTEM-FONTS.md)
-
-</details>
+**潮蓝 · 青瓷 · 琥珀 · 烟紫 · 玫瑰 · 石墨**，六款强调色用于按钮、选中状态与玻璃边缘。侧栏、栏目与应用名称可以跟随 Windows 字体，或独立选择字体、加粗、斜体与文字颜色。
 
 ## 三步开始
 
-1. [下载 Windows 便携版](https://github.com/FouHe0720/LumaDock/releases/download/v0.10.2/LumaDock-0.10.2-win-x64.zip)，**完整解压**到准备长期保留的可写文件夹。
-2. 双击 **LumaDock.exe**，等待首次扫描。便携包包含 .NET Desktop Runtime，无需安装 SDK、IDE、字体包或主题软件。
-3. 按 **Ctrl + Alt + Space** 打开应用；右键应用 → **固定到 Dock**。未扫描的软件可通过“添加应用”选择程序或快捷方式。
+1. [下载 Windows 便携版](https://github.com/FouHe0720/LumaDock/releases/download/v0.12.0/LumaDock-0.12.0-win-x64.zip)，**完整解压**到准备长期保留的可写文件夹。
+2. 双击 **LumaDock.exe**，等待首次扫描。便携包包含 .NET Desktop Runtime，普通使用无需 SDK、IDE、字体包或其他主题工具。
+3. 点击左端 L 图标，或按 **Ctrl + Alt + Space** 打开应用库。右键常用应用 → **固定到 Dock**；没扫描到的程序通过“添加应用”选择路径。
 
-普通使用不需要管理员权限。`source.zip` 和 GitHub 的 “Source code” 用于开发，不能直接作为程序运行。
-
-<details>
-<summary><b>常用操作与双屏设置</b></summary>
-
-| 想做什么 | 从这里开始 |
-| --- | --- |
-| 打开应用 | 点击 Dock 左端 L 图标，或按 **Ctrl + Alt + Space** |
-| Dock 被工作窗口遮住 | 返回桌面使用 Dock，或按 **Ctrl + Alt + Space** 打开应用列表 |
-| 把应用插到中间 | 拖到 Dock 的目标位置，看到插入标记后松开 |
-| 把 Dock 应用放到桌面 | 拖到 Windows 桌面，创建快捷方式，固定状态保留 |
-| 栏目与排序 | 新建栏目，拖到栏目标签或右键放入；栏目可随时改名或删除 |
-| 选择其他启动参数 | 右键应用或 Dock 图标 → **启动方式**，选择保留的入口 |
-| 更换图标 | 右键应用 → **更换图标…**；可随时恢复原图标 |
-| 提高倒影与图标鲜艳度 | **偏好设置 → Dock → 倒影强度 / 图标鲜艳度** |
-| 让 Dock 更透明 | **偏好设置 → 材质 → Dock 浓度**，降低数值 |
-| 换玻璃、主题和配色 | **偏好设置 → 材质** |
-| 调整字体、粗细与文字颜色 | **偏好设置 → 字体与文字** |
-| 选择第二块屏幕 | **偏好设置 → Dock → 显示器**，选择目标屏幕 |
-| 开机启动 | **偏好设置 → 性能与启动**，主动启用并确认 |
-| 完全退出 | 托盘菜单 → **退出 LumaDock** |
-
-**应用**统一呈现开始菜单、桌面、AppsFolder 注册入口和手动添加的程序，不再分成两个页面。初次使用没有默认分类；点击“新建栏目”，按自己的习惯整理。栏目右键可重命名或删除，应用右键可放入栏目或取消归属。
-
-重复快捷方式按真实启动目标和系统标识合并。同名且指向同一本地程序的不同启动方式集中在一张卡片，原始参数与工作目录保留；右键 **启动方式** 即可选择。不同程序、网页、协议和打包应用身份仍分别保留，名称相同本身不会导致合并。
-
-已确认失效的入口暂不显示，原有图标、栏目与固定记录保留，程序恢复后可重新出现。扫描覆盖开始菜单、桌面与 AppsFolder 注册入口，不遍历整块磁盘；未注册的便携软件需要手动添加。
-
-快捷方式、自启、配置备份、正常卸载与恢复 Windows 桌面的完整步骤，见 [使用指南](docs/USER-GUIDE.md)。
-
-</details>
-
-## 轻量驻留，有实测依据
-
-界面采用 **C# · .NET 10 LTS · WPF · Windows Shell**。动态透景交给系统合成，图标与流光停稳后停止动画，窗口状态通过 Windows 事件更新。
-
-倒影直接复用当前图标图像，不为镜像再生成一份位图。鲜艳度在图标加载或设置改变后处理并缓存，空闲时不重复计算。悬停、反光与输入光标按各自事件更新，静止时不维持动画循环。
-
-0.10.2 已完成 **247 项组件与原生界面检查**，以及 **100 次窗口开合与搜索**。原生层级检查覆盖四边重定位、刷新与重建，确认前台应用保持在 Dock 上方，键盘焦点也保留在工作窗口。[查看验证记录](docs/validation.md)
-
-资源数据按实际运行状态记录。最新一轮包含已创建主界面的后台静置，采样期间应用未处于前台；它不是纯 Dock 基线，也不能与旧版纯 Dock 数据直接比较。完整数值、二进制哈希与历史记录见 [性能记录](docs/performance.md)。
-
-当前为预发布版本。目标为 Windows 10 / 11 x64，推荐 Windows 11；已验证环境、跨桌面鼠标操作与混合 DPI 等边界见 [验证范围](docs/validation.md)。
-
-<details>
-<summary><b>从源码构建</b></summary>
-
-在 Windows x64 上安装项目指定的 .NET 10 SDK，然后从项目根目录运行：
+`source.zip` 和 GitHub 自动生成的 Source code 供开发使用。源码构建需要 Windows x64 与 [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0)：
 
 ```powershell
+git clone https://github.com/FouHe0720/LumaDock.git
+cd LumaDock
 .\scripts\build.ps1
 .\scripts\test.ps1
 .\scripts\start.ps1 -Launchpad
 ```
 
-SDK 版本、安装方式、项目结构及完整测试命令见 [开发文档](docs/DEVELOPMENT.md)。WPF 正式编译与桌面验收需要 Windows 环境。
+[完整构建与发布步骤 →](docs/DEVELOPMENT.md)
 
-</details>
+## 常用操作
 
-## 文档与反馈
+| 想做什么 | 从这里开始 |
+| --- | --- |
+| 快速找桌面程序 | 左侧 **桌面集**，可搜索、启动或固定到 Dock |
+| 把应用插到两个图标中间 | 拖到 Dock 的插入标记处，松开即可 |
+| 把 Dock 应用放到桌面 | 拖到 Windows 桌面创建快捷方式，原文件和固定状态保留 |
+| 切换、最小化或关闭应用窗口 | 点击运行图标，或打开其右键窗口菜单 |
+| 更换应用图标 | 右键 → **更换图标…**，可随时恢复原图标 |
+| 建立自己的栏目 | **新建栏目**，拖入应用；右键栏目可改名或删除 |
+| 调整系统区图标、字号与粗细 | **偏好设置 → 系统状态区** |
+| 调整字体、粗细与文字颜色 | **偏好设置 → 字体与文字** |
+| 选择第二块屏幕 | **偏好设置 → Dock → 显示器** |
+| 设置开机启动 | **偏好设置 → 性能与启动**，主动启用并确认 |
+| 创建 LumaDock 桌面快捷方式 | 为解压目录中的 `LumaDock.exe` 创建快捷方式 |
+| 完全退出 | Dock 空白处或托盘菜单 → **退出 LumaDock** |
 
-[完整使用指南](docs/USER-GUIDE.md) · [字体与文字](docs/SYSTEM-FONTS.md) · [版本说明](docs/RELEASE-0.10.2.md) · [性能记录](docs/performance.md) · [开发文档](docs/DEVELOPMENT.md)
+LumaDock 保留 Windows 原任务栏与桌面设置。若选择自动隐藏任务栏，请在 Windows 的任务栏设置中操作；恢复时关闭该选项。系统托盘由 Windows 显示，外观沿用系统；第三方输入法不提供可读取的模式接口时，中／英按钮会显示不可用；外置显示器亮度接口目前不在自绘滑块控制范围内。详情见 [使用指南](docs/USER-GUIDE.md#dock-系统区)。
 
-配置与日志保存在 `%LOCALAPPDATA%\LumaDock`，不主动上传。启用开机启动或改变桌面图标显示时会单独确认。
+## 轻量驻留
 
-0.10 会将旧配置升级为格式 2。升级前建议导出备份；回退旧版时使用升级前备份或独立数据目录，避免旧程序覆盖新配置。[升级说明](docs/USER-GUIDE.md#从旧版本升级)
+**C# · .NET 10 LTS · WPF · Windows Shell。** 窗口状态、网络、电源与音频由事件更新，图标异步读取并缓存；亮度只在面板打开或用户操作时查询。时钟按分钟更新，Dock 隐藏后暂停。
 
-遇到问题，欢迎提交 [Issue](https://github.com/FouHe0720/LumaDock/issues)，写明系统版本、缩放比例与复现步骤；分享日志或截图前请移除私人信息。
+图标倒影复用已有图像，鲜艳度处理结果使用有界缓存；悬停与反光停稳后停止动画。没有大型浏览器运行时，也没有额外后台服务。
 
-源码采用 [MIT License](LICENSE)。发行包附带微软 .NET Runtime 许可与第三方声明；运行时读取的应用图标归各自权利人所有。
+Windows 11 两轮静置实测平均全机 CPU：Dock **0.0235%**，应用库前台 **0.0380%**。
+
+私有工作集峰值分别 **56.527 / 77.938 MB**；私有提交为 **105.832 / 147.703 MB**，两者口径不同。
+
+应用库首帧 **324.182 ms**，为进程内计时。两轮请求采样分别为 90 秒和 45 秒，不代替过夜驻留验收；完整条件、程序集校验值与未覆盖场景见 [性能记录](docs/performance.md) 和 [验证范围](docs/validation.md)。
+
+## 数据与退出
+
+配置和轮转日志保存在 `%LOCALAPPDATA%\LumaDock`。导出、导入和恢复默认值位于 **偏好设置 → 数据**。软件不主动上传配置或应用清单；扫描只读已注册的程序入口，不遍历整块磁盘。
+
+开机启动通过当前用户启动文件夹中的快捷方式实现，启用前确认。卸载时先关闭开机启动、退出软件，再移除解压文件夹和 LumaDock 快捷方式。需要保留整理结果时保留数据目录。[完整退出、卸载与桌面恢复步骤 →](docs/USER-GUIDE.md#9-桌面图标恢复与卸载)
+
+遇到问题，欢迎提交 [Issue](https://github.com/FouHe0720/LumaDock/issues)，写明版本、系统、缩放比例与复现步骤；分享截图或日志前请移除私人信息。
+
+源码采用 [MIT License](LICENSE)。发行包附带微软 .NET Runtime 许可与第三方声明；运行时读取的应用名称与图标归各自所有者所有。

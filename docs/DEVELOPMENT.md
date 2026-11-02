@@ -66,6 +66,9 @@ WSL 可用于编辑文件，但 Linux 构建结果不能代替 Windows WPF 编�
 | `scripts/test-typography-ui.ps1` | 实际 WPF 栏目字体、文字颜色、预览、导航与流光停止 | Windows 交互会话 |
 | `scripts/test-dock-ui.ps1` | Dock 四边与三轮廓、放大边界、命中、滚动与动画停止 | Windows 交互会话 |
 | `scripts/test-ui.ps1` | 窗口循环、重建和开合回归 | Windows 交互会话 |
+| `dotnet run --project tests/LumaDock.Running.Tests -c Release` | 临时运行分组、固定去重、AUMID／共用宿主身份；仅确定性快照 | Windows |
+| `dotnet run --project tests/LumaDock.System.Tests -c Release` | 真实设备只读快照、系统动作替身、COM 释放 | Windows 交互会话 |
+| `dotnet run --project tests/LumaDock.System.Ui.Tests -c Release` | 真实系统区、快捷控制、月历、四边定位及重建 | Windows 交互会话 |
 | `scripts/test-activation.ps1` | 多进程单实例激活 | Windows |
 | `scripts/test-backdrop.ps1` | 原生背景属性与回退 | Windows 交互会话 |
 | `scripts/test-sampler.ps1` | 后方区域采样与资源释放 | Windows 交互会话 |

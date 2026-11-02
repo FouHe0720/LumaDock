@@ -194,6 +194,9 @@ public static class Catalog
         if (!new[] { "Lagoon", "Jade", "Amber", "Iris", "Rose", "Graphite" }.Contains(s.Accent)) s.Accent = "Lagoon";
         if (!new[] { "Capsule", "Pebble", "Rail" }.Contains(s.DockShape)) s.DockShape = "Capsule";
         s.IconSize = double.IsFinite(s.IconSize) ? Math.Clamp(s.IconSize, 32, 80) : 48;
+        s.DockStatusIconSize = double.IsFinite(s.DockStatusIconSize) ? Math.Clamp(s.DockStatusIconSize, 12, 24) : 16;
+        s.DockStatusFontSize = double.IsFinite(s.DockStatusFontSize) ? Math.Clamp(s.DockStatusFontSize, 10, 18) : 12;
+        s.DockStatusFontWeight = Math.Clamp(s.DockStatusFontWeight, 400, 800);
         s.Spacing = double.IsFinite(s.Spacing) ? Math.Clamp(s.Spacing, 4, 24) : 10;
         s.CornerRadius = double.IsFinite(s.CornerRadius) ? Math.Clamp(s.CornerRadius, 0, 40) : 24;
         s.AnimationStrength = double.IsFinite(s.AnimationStrength) ? Math.Clamp(s.AnimationStrength, 0, 1) : .45;

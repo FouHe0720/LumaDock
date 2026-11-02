@@ -22,6 +22,7 @@ try {
     New-Item -ItemType Directory -Path $LumaPublicTests -Force | Out-Null
     # Explicit allowlist: local upgrade reports, configurations and captures are never shipping evidence.
     $LumaTestNames = @('results.json','lens-results.json','layout-results.json','cadence-results.json',
+        'running-results.json','system-results.json','input-results.json','system-ui-results.json',
         "results-$LumaShortVersion.json","dock-ui-$LumaShortVersion-results.json",
         "typography-ui-$LumaShortVersion-results.json","compositor-ui-$LumaShortVersion-results.json",
         "windows-results-$LumaShortVersion.json","icon-results-$LumaShortVersion.json",

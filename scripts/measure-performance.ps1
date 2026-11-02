@@ -27,6 +27,22 @@ namespace LumaDock {
             uint foregroundId; GetWindowThreadProcessId(GetForegroundWindow(), out foregroundId);
             return foregroundId == (uint)processId;
         }
+        private delegate bool EnumCallback(IntPtr window, IntPtr parameter);
+        [DllImport("user32.dll")] private static extern bool EnumWindows(EnumCallback callback, IntPtr parameter);
+        [DllImport("user32.dll")] private static extern bool IsWindowVisible(IntPtr window);
+        [DllImport("user32.dll", CharSet=CharSet.Unicode)] private static extern int GetWindowText(IntPtr window, System.Text.StringBuilder text, int count);
+        [DllImport("user32.dll", EntryPoint="GetWindowLongPtrW")] private static extern IntPtr GetWindowLongPtr(IntPtr window, int index);
+        public static bool MainWindowVisible(int processId) {
+            bool visible = false;
+            EnumWindows((window, unused) => {
+                uint owner; GetWindowThreadProcessId(window, out owner);
+                if (owner != (uint)processId || !IsWindowVisible(window) || (GetWindowLongPtr(window, -20).ToInt64() & 0x80) != 0) return true;
+                var title = new System.Text.StringBuilder(128); GetWindowText(window,title,title.Capacity);
+                if (title.ToString() == "LumaDock") visible = true;
+                return true;
+            }, IntPtr.Zero);
+            return visible;
+        }
         public static bool HasNativeCaret(int processId) {
             uint foregroundId;
             var thread = GetWindowThreadProcessId(GetForegroundWindow(), out foregroundId);
@@ -94,6 +110,7 @@ try {
             threads = $LumaMeasuredProcess.Threads.Count
             isForeground = [LumaDock.PerformanceNative]::IsForeground($LumaMeasuredProcess.Id)
             hasNativeCaret = [LumaDock.PerformanceNative]::HasNativeCaret($LumaMeasuredProcess.Id)
+            mainWindowVisible = [LumaDock.PerformanceNative]::MainWindowVisible($LumaMeasuredProcess.Id)
         })
         $LumaPreviousCpu = $LumaCpu
         $LumaPreviousTime = $LumaNow
@@ -131,6 +148,7 @@ $LumaSummary = [ordered]@{
     sampleCount = $LumaSamples.Count
     foregroundSamples = @($LumaSamples | Where-Object isForeground).Count
     nativeCaretSamples = @($LumaSamples | Where-Object hasNativeCaret).Count
+    mainWindowVisibleSamples = @($LumaSamples | Where-Object mainWindowVisible).Count
     averageCpuPercentMachine = ($LumaSamples | Measure-Object cpuPercentMachine -Average).Average
     averageCpuPercentOneCore = ($LumaSamples | Measure-Object cpuPercentOneCore -Average).Average
     peakWorkingSetMB = ($LumaSamples | Measure-Object workingSetMB -Maximum).Maximum

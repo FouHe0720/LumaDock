@@ -42,6 +42,11 @@ public sealed class DockSettings
     public string DockShape { get; set; } = "Capsule";
     public string Position { get; set; } = "Bottom";
     public bool AutoHide { get; set; }
+    public bool DockSystemEnabled { get; set; } = true;
+    public bool ShowRunningApps { get; set; } = true;
+    public double DockStatusIconSize { get; set; } = 16;
+    public double DockStatusFontSize { get; set; } = 12;
+    public int DockStatusFontWeight { get; set; } = 600;
     public double AnimationStrength { get; set; } = .45;
     public bool Animations { get; set; } = true;
     public bool PowerSaver { get; set; }
