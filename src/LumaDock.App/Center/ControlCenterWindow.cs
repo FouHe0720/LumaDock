@@ -640,14 +640,15 @@ public sealed class ControlCenterWindow : Window
         SliderRow(stack, "流动幅度", 0, 1, settings.GlassFlowStrength, value => settings.GlassFlowStrength = value, value => $"{value:P0}");
         if (!settings.LiveGlass) SliderRow(stack, "静态折射清晰度", .1, 1, settings.GlassClarity, value => settings.GlassClarity = value, value => $"{value:P0}");
         SelectRow(stack, "主题", "", new[] { ("System", "跟随系统"), ("Dark", "深色"), ("Light", "浅色") }, settings.Theme, value => settings.Theme = value);
-        SliderRow(stack, "Dock 浓度", .15, 1, settings.Opacity, value => settings.Opacity = value, value => $"{value:P0}", "数值越低，底座越通透");
+        SliderRow(stack, "Dock 浓度", .02, 1, settings.Opacity, value => settings.Opacity = value, value => $"{value:P0}", "数值越低，底座越通透；图标保持清楚");
         SliderRow(stack, "圆角", 8, 36, settings.CornerRadius, value => settings.CornerRadius = value, value => $"{value:0} px");
         SliderRow(stack, "图标大小", 32, 80, settings.IconSize, value => settings.IconSize = value, value => $"{value:0} px");
         SliderRow(stack, "图标间距", 3, 24, settings.Spacing, value => settings.Spacing = value, value => $"{value:0} px");
         var dockHeading = Section(stack, "Dock", "");
         DockShapeRow(stack);
         ToggleRow(stack, "图标倒影", "淡淡映在底座上；省电与高对比度时暂时关闭", settings.IconReflection, value => settings.IconReflection = value);
-        SliderRow(stack, "倒影强度", 0, .5, settings.ReflectionStrength, value => settings.ReflectionStrength = value, value => $"{value:P0}");
+        SliderRow(stack, "倒影强度", 0, .85, settings.ReflectionStrength, value => settings.ReflectionStrength = value, value => $"{value:P0}");
+        SliderRow(stack, "图标鲜艳度", 0, 1, settings.DockIconVibrancy, value => settings.DockIconVibrancy = value, value => $"{value:P0}", "提亮图标、增加色彩；0% 保留原色");
         SelectRow(stack, "位置", "", new[] { ("Bottom", "底部"), ("Left", "左侧"), ("Right", "右侧"), ("Top", "顶部") }, settings.Position, value => settings.Position = value);
         var monitors = new List<(string, string)> { ("", "主显示器（自动）") };
         try { monitors.AddRange(MonitorService.GetMonitors().Select(m => (m.DeviceName, m.Label))); } catch (Exception ex) { Debug.WriteLine(ex); }

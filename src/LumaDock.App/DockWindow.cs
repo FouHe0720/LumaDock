@@ -105,10 +105,10 @@ public sealed class DockWindow : Window
         var s = controller.State.Settings;
         var optical = s.LiquidGlass && !s.PowerSaver && !SystemParameters.HighContrast;
         var baseColor = ((SolidColorBrush)FindResource("OpaqueSurfaceBrush")).Color;
-        var opacity = Math.Clamp((controller.State.Settings.Opacity - .15) / .85, 0, 1);
+        var opacity = Math.Clamp((controller.State.Settings.Opacity - .02) / .98, 0, 1);
         var realtime = optical && s.LiveGlass;
         // Live mode uses one translucent plate; reduced/static modes retain a solid fallback.
-        baseColor.A = realtime ? (byte)Math.Round(14 + 158 * Math.Pow(s.Opacity, 1.85)) : (byte)255;
+        baseColor.A = realtime ? (byte)Math.Round(4 + 168 * Math.Pow(s.Opacity, 1.65)) : (byte)255;
         if (SystemParameters.HighContrast) baseColor = SystemColors.WindowColor;
         plate.Fill = new SolidColorBrush(baseColor);
         tint.Background = optical && !realtime ? new SolidColorBrush(Color.FromArgb((byte)(5 + 72 * opacity * opacity * opacity), baseColor.R, baseColor.G, baseColor.B)) : Brushes.Transparent;
@@ -196,7 +196,10 @@ public sealed class DockWindow : Window
             var s = controller.State.Settings;
             var pixels = (int)Math.Ceiling(s.IconSize * (1 + s.AnimationStrength * .8) * VisualTreeHelper.GetDpi(this).DpiScaleX / 16) * 16;
             var icon = await controller.GetIconAsync(app, Math.Clamp(pixels, 32, 256));
-            if (generation == version) image.Source = icon;
+            if (generation != version || closed) return;
+            var vibrancy = SystemParameters.HighContrast ? 0 : s.DockIconVibrancy;
+            var colored = icon == null || vibrancy <= 0 ? icon : await Task.Run(() => DockIconColor.Enhance(icon, vibrancy));
+            if (generation == version && !closed) image.Source = colored;
         }
         catch (Exception ex) { Storage.Log.Write("Icon failed " + app.Name, ex); }
     }

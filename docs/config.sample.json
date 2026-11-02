@@ -10,6 +10,7 @@
     "DockMaterialVersion": 1,
     "IconReflection": true,
     "ReflectionStrength": 0.24,
+    "DockIconVibrancy": 0.28,
     "LiquidGlass": true,
     "LiveGlass": true,
     "LiveGlassStyle": "Clear",

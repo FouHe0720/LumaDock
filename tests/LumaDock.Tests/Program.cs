@@ -409,9 +409,18 @@ Test("Dock transparency migration and reflection controls preserve explicit user
     Assert(defaults.Settings.Opacity == .70 && defaults.Settings.IconReflection && defaults.Settings.ReflectionStrength == .24);
     defaults.Settings.Opacity = .88; Catalog.Normalize(defaults); Assert(defaults.Settings.Opacity == .88);
     var custom = new AppState { Settings = new() { Opacity = .23, ReflectionStrength = 900, IconReflection = false } }; Catalog.Normalize(custom);
-    Assert(custom.Settings.Opacity == .23 && custom.Settings.ReflectionStrength == .5 && !custom.Settings.IconReflection);
+    Assert(custom.Settings.Opacity == .23 && custom.Settings.ReflectionStrength == .85 && !custom.Settings.IconReflection);
     custom.Settings.Opacity = 0; custom.Settings.ReflectionStrength = double.NaN; Catalog.Normalize(custom);
-    Assert(custom.Settings.Opacity == .15 && custom.Settings.ReflectionStrength == .24);
+    Assert(custom.Settings.Opacity == .02 && custom.Settings.ReflectionStrength == .24);
+});
+Test("Extended Dock clarity, reflection and vibrancy survive saving and reject non-finite values", () =>
+{
+    var store = Store("dock-color"); var state = new AppState { Settings = new() { Opacity = .04, ReflectionStrength = .72, DockIconVibrancy = .50 } };
+    store.Save(state); var read = store.Load();
+    Assert(read.Settings.Opacity == .04 && read.Settings.ReflectionStrength == .72 && read.Settings.DockIconVibrancy == .50);
+    read.Settings.DockIconVibrancy = double.NaN; Catalog.Normalize(read); Assert(read.Settings.DockIconVibrancy == .28);
+    read.Settings.DockIconVibrancy = 100; Catalog.Normalize(read); Assert(read.Settings.DockIconVibrancy == 1);
+    read.Settings.DockIconVibrancy = -1; Catalog.Normalize(read); Assert(read.Settings.DockIconVibrancy == 0);
 });
 Test("Text colors normalize to bounded opaque RGB and reject brushes or markup", () =>
 {

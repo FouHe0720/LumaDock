@@ -27,6 +27,7 @@ public sealed class DockSettings
     public int DockMaterialVersion { get; set; }
     public bool IconReflection { get; set; } = true;
     public double ReflectionStrength { get; set; } = .24;
+    public double DockIconVibrancy { get; set; } = .28;
     public bool LiquidGlass { get; set; } = true;
     public bool LiveGlass { get; set; } = true;
     public string LiveGlassStyle { get; set; } = "Clear";

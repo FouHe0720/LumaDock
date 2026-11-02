@@ -368,14 +368,18 @@ internal static class Program
                     Require(!new StateStore(dataPath).Load().Settings.IconReflection, "The actual reflection toggle did not save.");
                     reflect.IsChecked = true; reflect.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
                     var strength = Descendants<Slider>(window).Single(slider => System.Windows.Automation.AutomationProperties.GetName(slider) == "倒影强度");
-                    strength.Value = .31;
+                    Require(Math.Abs(strength.Maximum - .85) < .001, "The expanded reflection strength is unavailable.");
+                    strength.Value = .72;
                     strength.RaiseEvent(new MouseButtonEventArgs(Mouse.PrimaryDevice, Environment.TickCount, MouseButton.Left) { RoutedEvent = UIElement.PreviewMouseLeftButtonUpEvent });
                     var density = Descendants<Slider>(window).Single(slider => System.Windows.Automation.AutomationProperties.GetName(slider) == "Dock 浓度");
-                    Require(Math.Abs(density.Minimum - .15) < .001, "The transparent range is still restricted to the old minimum.");
-                    density.Value = .25;
+                    Require(Math.Abs(density.Minimum - .02) < .001, "The transparent range is still restricted to the old minimum.");
+                    density.Value = .04;
                     density.RaiseEvent(new MouseButtonEventArgs(Mouse.PrimaryDevice, Environment.TickCount, MouseButton.Left) { RoutedEvent = UIElement.PreviewMouseLeftButtonUpEvent });
+                    var vivid = Descendants<Slider>(window).Single(slider => System.Windows.Automation.AutomationProperties.GetName(slider) == "图标鲜艳度");
+                    vivid.Value = .50;
+                    vivid.RaiseEvent(new MouseButtonEventArgs(Mouse.PrimaryDevice, Environment.TickCount, MouseButton.Left) { RoutedEvent = UIElement.PreviewMouseLeftButtonUpEvent });
                     var saved = new StateStore(dataPath).Load().Settings;
-                    Require(saved.IconReflection && Math.Abs(saved.ReflectionStrength - .31) < .001 && Math.Abs(saved.Opacity - .25) < .001, "Reflection strength or concentration did not persist through actual controls.");
+                    Require(saved.IconReflection && Math.Abs(saved.ReflectionStrength - .72) < .001 && Math.Abs(saved.Opacity - .04) < .001 && Math.Abs(saved.DockIconVibrancy - .50) < .001, "Reflection strength, vibrancy or concentration did not persist through actual controls.");
                     Require(Descendants<TextBlock>(window).Any(text => text.Text == "Windows 桌面图标"), "The original desktop icon recovery control is no longer reachable.");
                 });
                 foreach (var value in new[] { "Rose", "Graphite" })

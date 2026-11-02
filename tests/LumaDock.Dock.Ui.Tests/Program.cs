@@ -61,6 +61,61 @@ internal static class Program
                     Require(buttons.Select(System.Windows.Automation.AutomationProperties.GetName).SequenceEqual(new[] { "应用" }.Concat(controller.State.Apps.Select(a => a.Name))), "Dock accessibility names do not match records.");
                 });
                 Check("Dock hover is dormant at rest", () => Require(!Field<DispatcherTimer>(dock, "hover").IsEnabled, "Hover timer is running without input."));
+                Check("Icon color enhancement preserves the original at zero or an invalid amount", () =>
+                {
+                    var source = ColorSample();
+                    foreach (var amount in new[] { 0d, -1d, double.NaN, double.PositiveInfinity })
+                        Require(ReferenceEquals(source, EnhanceColor(source, amount)), "An original-color request changed the image.");
+                });
+                Check("Icon color enhancement increases real color separation without tinting grayscale", () =>
+                {
+                    var source = ColorSample(); var before = IconPixels(source);
+                    var result = (BitmapSource)EnhanceColor(source, 1); var after = IconPixels(result);
+                    Require(after.Take(3).Max() - after.Take(3).Min() > before.Take(3).Max() - before.Take(3).Min(), "The color setting did not increase chroma.");
+                    Require(after[4] == after[5] && after[5] == after[6] && after[4] >= before[4], "A neutral icon acquired a color cast or became darker.");
+                    Require(IconPixels(source).SequenceEqual(before), "The source icon was modified.");
+                });
+                Check("Color adjustment keeps transparent and translucent icon alpha byte-identical", () =>
+                {
+                    var source = ColorSample(); var before = IconPixels(source); var after = IconPixels((BitmapSource)EnhanceColor(source, .7));
+                    Require(Enumerable.Range(0, before.Length / 4).All(i => before[i * 4 + 3] == after[i * 4 + 3]), "The color control changed alpha.");
+                    Require(before.AsSpan(12, 4).SequenceEqual(after.AsSpan(12, 4)), "A transparent pixel was given invented content.");
+                });
+                Check("Premultiplied icon edges receive the same straight-color adjustment", () =>
+                {
+                    var source = ColorSample(); var premultiplied = new FormatConvertedBitmap(source, PixelFormats.Pbgra32, null, 0); premultiplied.Freeze();
+                    var straight = IconPixels((BitmapSource)EnhanceColor(source, .6)); var converted = IconPixels((BitmapSource)EnhanceColor(premultiplied, .6));
+                    for (var i = 0; i < straight.Length; i++)
+                        if (straight[i / 4 * 4 + 3] != 0) Require(Math.Abs(straight[i] - converted[i]) <= 2, "Premultiplied edges changed hue or became dark.");
+                });
+                Check("Enhanced icons keep non-square dimensions, DPI and frozen cross-thread ownership", () =>
+                {
+                    var source = ColorSample(); var result = (BitmapSource)Task.Run(() => EnhanceColor(source, .5)).GetAwaiter().GetResult();
+                    Require(result.PixelWidth == 3 && result.PixelHeight == 2 && Math.Abs(result.DpiX - 144) < .001 && Math.Abs(result.DpiY - 120) < .001, "Color adjustment changed dimensions or DPI.");
+                    Require(result.IsFrozen && result.CanFreeze && result.Format == PixelFormats.Bgra32, "Enhanced image cannot be shared as a frozen source.");
+                });
+                Check("Icon enhancement caches one latest adjustment and shares concurrent requests", () =>
+                {
+                    var source = ColorSample(); var first = EnhanceColor(source, .5);
+                    Require(ReferenceEquals(first, EnhanceColor(source, .50001)), "Equivalent slider amounts allocated another image.");
+                    var results = Task.WhenAll(Enumerable.Range(0, 8).Select(_ => Task.Run(() => EnhanceColor(source, .8)))).GetAwaiter().GetResult();
+                    Require(results.All(result => ReferenceEquals(result, results[0])), "Concurrent loads duplicated enhanced images.");
+                    Require(!ReferenceEquals(first, EnhanceColor(source, .5)), "The color cache retained an old adjustment instead of only the latest.");
+                    Require(ReferenceEquals(EnhanceColor(source, 1), EnhanceColor(source, 2)), "The enhancement upper bound was not normalized.");
+                });
+                Check("Unsupported, mutable and oversized artwork stays at its real original", () =>
+                {
+                    var drawing = new DrawingImage(new GeometryDrawing(Brushes.Red, null, new RectangleGeometry(new Rect(0, 0, 16, 16)))); drawing.Freeze();
+                    var mutable = BitmapSource.Create(1, 1, 96, 96, PixelFormats.Bgra32, null, new byte[] { 20, 40, 80, 255 }, 4);
+                    var oversized = BitmapSource.Create(513, 1, 96, 96, PixelFormats.Bgra32, null, new byte[513 * 4], 513 * 4); oversized.Freeze();
+                    foreach (var source in new ImageSource[] { drawing, mutable, oversized })
+                        Require(ReferenceEquals(source, EnhanceColor(source, .5)), "Unsupported artwork was replaced or decoded without bounds.");
+                });
+                Check("Fully transparent artwork creates neither a color layer nor another image", () =>
+                {
+                    var source = BitmapSource.Create(2, 1, 96, 96, PixelFormats.Bgra32, null, new byte[8], 8); source.Freeze();
+                    Require(ReferenceEquals(source, EnhanceColor(source, 1)), "A transparent icon allocated colored artwork.");
+                });
                 Check("Launcher reflection reuses its actual frozen artwork without another bitmap", () =>
                 {
                     var tile = Tiles(dock)[0];
@@ -73,6 +128,18 @@ internal static class Program
                 {
                     Check($"{direction} reflection mirrors actual icon pixels toward the outer edge and fades away", () => CheckReflectionPixels(direction));
                 }
+                Check("The stronger mirror setting exceeds the previous limit without inventing pixels", () =>
+                {
+                    var source = ColorIcon(); var half = CreateReflection("Bottom", .5); var strong = CreateReflection("Bottom", .85);
+                    SetReflectionSource(half, source); SetReflectionSource(strong, source);
+                    var halfPixels = RenderPixels(half); var strongPixels = RenderPixels(strong);
+                    var halfAlpha = halfPixels.Where((_, index) => index % 4 == 3).Sum(value => (int)value);
+                    var strongAlpha = strongPixels.Where((_, index) => index % 4 == 3).Sum(value => (int)value);
+                    Require(strongAlpha > halfAlpha * 1.5, "The mirror slider still clamps at the former 50% limit.");
+                    Require(ReferenceEquals(source, strong.GetType().GetProperty("Source")!.GetValue(strong)), "The stronger mirror copied or substituted the real source.");
+                    var shelf = (Rect)strong.GetType().GetProperty("ShelfBounds", Private)!.GetValue(strong)!;
+                    Require(shelf.Height > 24 && shelf.Height <= 28, "The mirror did not gain its bounded depth.");
+                });
                 Check("Missing or disabled reflection paints no invented fallback", () =>
                 {
                     var reflection = CreateReflection("Bottom", 0);
@@ -442,6 +509,22 @@ internal static class Program
         var reflection = (FrameworkElement)Activator.CreateInstance(type)!;
         Call(reflection, "Configure", position, 88d, 160d, 70d, 64d, 64d, 64d, strength);
         return reflection;
+    }
+    private static ImageSource EnhanceColor(ImageSource source, double amount) => (ImageSource)typeof(DockWindow).Assembly
+        .GetType("LumaDock.App.DockIconColor")!.GetMethod("Enhance", BindingFlags.Static | BindingFlags.NonPublic)!.Invoke(null, [source, amount])!;
+    private static BitmapSource ColorSample()
+    {
+        var source = BitmapSource.Create(3, 2, 144, 120, PixelFormats.Bgra32, null, new byte[]
+        {
+            90, 120, 180, 255, 96, 96, 96, 255, 160, 80, 40, 128,
+            17, 9, 4, 0, 32, 64, 96, 64, 0, 0, 0, 255
+        }, 12);
+        source.Freeze(); return source;
+    }
+    private static byte[] IconPixels(BitmapSource source)
+    {
+        BitmapSource straight = source.Format == PixelFormats.Bgra32 ? source : new FormatConvertedBitmap(source, PixelFormats.Bgra32, null, 0);
+        var pixels = new byte[straight.PixelWidth * straight.PixelHeight * 4]; straight.CopyPixels(pixels, straight.PixelWidth * 4, 0); return pixels;
     }
     private static void SetReflectionSource(FrameworkElement reflection, ImageSource? source) => reflection.GetType().GetProperty("Source")!.SetValue(reflection, source);
     private static BitmapSource ColorIcon()

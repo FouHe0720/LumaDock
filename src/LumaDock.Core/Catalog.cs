@@ -186,8 +186,9 @@ public static class Catalog
         s.BackdropOpacity = double.IsFinite(s.BackdropOpacity) ? Math.Clamp(s.BackdropOpacity, .25, .9) : .65;
         if (s.DockMaterialVersion == 0 && Math.Abs(s.Opacity - .88) < .000001) s.Opacity = .70;
         s.DockMaterialVersion = 1;
-        s.Opacity = double.IsFinite(s.Opacity) ? Math.Clamp(s.Opacity, .15, 1) : .70;
-        s.ReflectionStrength = double.IsFinite(s.ReflectionStrength) ? Math.Clamp(s.ReflectionStrength, 0, .5) : .24;
+        s.Opacity = double.IsFinite(s.Opacity) ? Math.Clamp(s.Opacity, .02, 1) : .70;
+        s.ReflectionStrength = double.IsFinite(s.ReflectionStrength) ? Math.Clamp(s.ReflectionStrength, 0, .85) : .24;
+        s.DockIconVibrancy = double.IsFinite(s.DockIconVibrancy) ? Math.Clamp(s.DockIconVibrancy, 0, 1) : .28;
         s.GlassClarity = double.IsFinite(s.GlassClarity) ? Math.Clamp(s.GlassClarity, .1, 1) : .65;
         s.GlassFlowStrength = double.IsFinite(s.GlassFlowStrength) ? Math.Clamp(s.GlassFlowStrength, 0, 1) : .45;
         if (!new[] { "Lagoon", "Jade", "Amber", "Iris", "Rose", "Graphite" }.Contains(s.Accent)) s.Accent = "Lagoon";

@@ -10,45 +10,49 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-7c8b82?style=flat-square" alt="MIT License"></a>
 </p>
 <p align="center">
-  <a href="https://github.com/FouHe0720/LumaDock/releases/download/v0.10.0/LumaDock-0.10.0-win-x64.zip"><img src="https://img.shields.io/badge/Download%200.10.0-Windows%20x64-3d7f84?style=for-the-badge" alt="下载 LumaDock 0.10.0 Windows 便携版"></a>
+  <a href="https://github.com/FouHe0720/LumaDock/releases/download/v0.10.1/LumaDock-0.10.1-win-x64.zip"><img src="https://img.shields.io/badge/Download%200.10.1-Windows%20x64-3d7f84?style=for-the-badge" alt="下载 LumaDock 0.10.1 Windows 便携版"></a>
 </p>
 <p align="center">完整解压即可运行 · 无需额外安装 .NET · Windows 11 推荐 · 预发布</p>
 <p align="center">
   <a href="docs/USER-GUIDE.md">使用指南</a> ·
-  <a href="https://github.com/FouHe0720/LumaDock/releases/tag/v0.10.0">版本说明</a> ·
+  <a href="https://github.com/FouHe0720/LumaDock/releases/tag/v0.10.1">版本说明</a> ·
   <a href="docs/DEVELOPMENT.md">开发文档</a>
 </p>
 
 LumaDock 是一款原生 Windows Dock 与应用管理器。常用软件放进悬浮 Dock，其他入口集中在“应用”里。栏目由自己新建，倒影、玻璃、轮廓、配色和文字也可按习惯调整。
 
-![LumaDock 0.10 应用](docs/assets/library010.png)
+![LumaDock 0.10.0 应用列表](docs/assets/library010.png)
 
-<p align="center"><sub>0.10 实际 WPF 界面，使用系统应用、隔离配置与原创示例背景。</sub></p>
+<p align="center"><sub>0.10.0 的真实应用列表，0.10.1 沿用这一布局；使用系统应用、隔离配置与原创示例背景。</sub></p>
 
 <table>
   <tr>
     <td width="33%" valign="top"><b>常用应用，一步就到</b><br><br>悬停放大、真实运行指示、四边停靠。拖到插入标记处，放进任意两个图标之间。</td>
     <td width="33%" valign="top"><b>一个列表，栏目自选</b><br><br>重复入口合并，同一应用的启动方式收进右键菜单。栏目可以随时新建、改名或删除。</td>
-    <td width="33%" valign="top"><b>外观由你决定</b><br><br>真实图标倒影、更通透的底座、三种轮廓与六款强调色。字体、粗细和文字颜色也能单独调整。</td>
+    <td width="33%" valign="top"><b>外观由你决定</b><br><br>更清楚的倒影、更通透的底座，还能调节图标鲜艳度。三种轮廓、六款强调色，字体和文字颜色也可自选。</td>
   </tr>
 </table>
 
 ## 让 Dock 有自己的轮廓
 
-圆润的胶囊、交错的卵石、利落的轨道。图标在底座映出淡淡倒影；指针经过时，当前图标放大并轻轻抬起，相邻图标随之让位，倒影一起变化。停稳后，动画收住。
+圆润的胶囊、交错的卵石、利落的轨道。图标映在通透的底座上；指针经过时，当前图标放大并轻轻抬起，相邻图标随之让位，倒影一起变化。停稳后，动画收住。
 
 <table>
   <tr>
-    <td width="50%" align="center"><img src="docs/assets/dock010-dark.png" alt="0.10 深色卵石 Dock，真实鼠标悬停放大" width="100%"><br><sub>深色 · 卵石 · 潮蓝</sub></td>
-    <td width="50%" align="center"><img src="docs/assets/dock010-light.png" alt="0.10 浅色轨道 Dock，真实鼠标悬停放大" width="100%"><br><sub>浅色 · 轨道 · 青瓷</sub></td>
+    <td width="50%" align="center"><img src="docs/assets/dock0101-dark.jpg" alt="0.10.1 深色 Dock，通透底座与清楚的图标倒影" width="100%"><br><sub>深色 · 通透倒影</sub></td>
+    <td width="50%" align="center"><img src="docs/assets/dock0101-light.jpg" alt="0.10.1 浅色 Dock，真实悬停放大与图标倒影" width="100%"><br><sub>浅色 · 通透倒影</sub></td>
   </tr>
 </table>
 
-<p align="center"><sub>两张均为当前 0.10 发布程序集的真实 Dock 控件，使用系统图标与独立示例背景。</sub></p>
+<p align="center"><sub>0.10.1 发布程序集的真实 Dock：倒影 72% · 底座浓度 4% · 图标鲜艳度 50%。系统图标，独立示例背景。</sub></p>
 
 将桌面程序或快捷方式拖入 Dock，可直接选择插入位置；将 Dock 图标拖到 Windows 桌面，会创建真实快捷方式。原文件和 Dock 固定状态保留，需要取消固定时右键移除。
 
-轮廓、位置、显示器、图标大小与悬停幅度，在 **偏好设置 → Dock** 中调整。图标倒影可单独开关、调整强度，省电与高对比度模式暂时关闭。底座的 **Dock 浓度** 可调为 15–100%，默认 70%；数值越低越通透，图标本身保持清楚。
+轮廓、位置、显示器、悬停幅度与倒影，在 **偏好设置 → Dock** 中调整。倒影强度可调至 **85%**，渐隐范围更长，悬停时也更清楚；省电与高对比度模式暂时关闭倒影。
+
+**偏好设置 → 材质 → Dock 浓度** 现在可调为 **2–100%**，默认 70%。数值越低越通透，图标本身保持清楚。图标大小、间距也在材质设置中调整。
+
+新加入 **图标鲜艳度**：在 Dock 设置中提亮图标、增加色彩，倒影跟随同样的颜色。默认 28%，设为 0% 保留原色；只改变 Dock 内的显示，不修改图标文件。
 
 ## 玻璃随画面一起变化
 
@@ -75,7 +79,7 @@ LumaDock 是一款原生 Windows Dock 与应用管理器。常用软件放进悬
 
 ## 三步开始
 
-1. [下载 Windows 便携版](https://github.com/FouHe0720/LumaDock/releases/download/v0.10.0/LumaDock-0.10.0-win-x64.zip)，**完整解压**到准备长期保留的可写文件夹。
+1. [下载 Windows 便携版](https://github.com/FouHe0720/LumaDock/releases/download/v0.10.1/LumaDock-0.10.1-win-x64.zip)，**完整解压**到准备长期保留的可写文件夹。
 2. 双击 **LumaDock.exe**，等待首次扫描。便携包包含 .NET Desktop Runtime，无需安装 SDK、IDE、字体包或主题软件。
 3. 按 **Ctrl + Alt + Space** 打开应用；右键应用 → **固定到 Dock**。未扫描的软件可通过“添加应用”选择程序或快捷方式。
 
@@ -92,6 +96,8 @@ LumaDock 是一款原生 Windows Dock 与应用管理器。常用软件放进悬
 | 栏目与排序 | 新建栏目，拖到栏目标签或右键放入；栏目可随时改名或删除 |
 | 选择其他启动参数 | 右键应用或 Dock 图标 → **启动方式**，选择保留的入口 |
 | 更换图标 | 右键应用 → **更换图标…**；可随时恢复原图标 |
+| 提高倒影与图标鲜艳度 | **偏好设置 → Dock → 倒影强度 / 图标鲜艳度** |
+| 让 Dock 更透明 | **偏好设置 → 材质 → Dock 浓度**，降低数值 |
 | 换玻璃、主题和配色 | **偏好设置 → 材质** |
 | 调整字体、粗细与文字颜色 | **偏好设置 → 字体与文字** |
 | 选择第二块屏幕 | **偏好设置 → Dock → 显示器**，选择目标屏幕 |
@@ -112,14 +118,14 @@ LumaDock 是一款原生 Windows Dock 与应用管理器。常用软件放进悬
 
 界面采用 **C# · .NET 10 LTS · WPF · Windows Shell**。动态透景交给系统合成，图标与流光停稳后停止动画，窗口状态通过 Windows 事件更新。
 
-倒影直接复用图标缓存，经过裁切和渐隐绘制，不另存图标副本。悬停、反光与输入光标按各自事件更新，静止时不维持动画循环。具体测试环境、版本、二进制与资源实测见 [性能记录](docs/performance.md)。
+倒影直接复用当前图标图像，不为镜像再生成一份位图。鲜艳度在图标加载或设置改变后处理并缓存，空闲时不重复计算。悬停、反光与输入光标按各自事件更新，静止时不维持动画循环。
 
-| 0.10 实测 | 平均 CPU（全机） | 私有工作集峰值 |
+| 0.10.1 Dock 静置实测 | 平均 CPU（全机） | 私有工作集峰值 |
 | --- | ---: | ---: |
-| Dock 静置 | 0.0000% | 62.8 MB |
-| 应用窗口前台、搜索聚焦 | 0.0015% | 67.8 MB |
+| 预热 30 秒，采样 60 秒 | 0.1846% | 54.0 MB |
+| 预热 120 秒，采样 60 秒 | 0.0065% | 51.4 MB |
 
-应用窗口首帧 **272 ms**，为应用内计时。以上在 Windows 11、16 个逻辑处理器下测量：6 个真实固定应用、倒影开启，各静置采样 60 秒；不代表持续悬停的峰值或长期驻留结果。完整口径与原始记录见 [性能记录](docs/performance.md)。
+Windows 11、16 个逻辑处理器，6 个真实固定应用；倒影 72%、底座浓度 4%、鲜艳度 50%。两轮均保留：首轮出现一次采样 CPU 1.6437%，原因尚未量化判定。本次只测 Dock 静置，不代表持续悬停、GPU 或长期驻留；完整数据与历史前台记录见 [性能记录](docs/performance.md)。
 
 当前为预发布版本。目标为 Windows 10 / 11 x64，推荐 Windows 11；已验证环境、跨桌面鼠标操作与混合 DPI 等边界见 [验证范围](docs/validation.md)。
 
@@ -140,7 +146,7 @@ SDK 版本、安装方式、项目结构及完整测试命令见 [开发文档](
 
 ## 文档与反馈
 
-[完整使用指南](docs/USER-GUIDE.md) · [字体与文字](docs/SYSTEM-FONTS.md) · [版本说明](docs/RELEASE-0.10.md) · [性能记录](docs/performance.md) · [开发文档](docs/DEVELOPMENT.md)
+[完整使用指南](docs/USER-GUIDE.md) · [字体与文字](docs/SYSTEM-FONTS.md) · [版本说明](docs/RELEASE-0.10.1.md) · [性能记录](docs/performance.md) · [开发文档](docs/DEVELOPMENT.md)
 
 配置与日志保存在 `%LOCALAPPDATA%\LumaDock`，不主动上传。启用开机启动或改变桌面图标显示时会单独确认。
 
