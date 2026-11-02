@@ -62,6 +62,9 @@ public sealed class ControlCenterWindow : Window
     private StackPanel? _settingsRoot;
     private StackPanel? _settingsGroup;
     private readonly Dictionary<string, TextBlock> _categoryCounts = new(StringComparer.Ordinal);
+    private IReadOnlyList<ApplicationDisplayGroup> _applicationGroups = [];
+    private Dictionary<string, IReadOnlyList<AppEntry>> _variantsById = new(StringComparer.OrdinalIgnoreCase);
+    private Dictionary<string, int> _applicationOrder = new(StringComparer.OrdinalIgnoreCase);
     private double _settingsScrollOffset;
     private TextBlock _title = new();
     private TextBlock _subtitle = new();
@@ -122,12 +125,13 @@ public sealed class ControlCenterWindow : Window
     }
 
     private static string NormalizeSection(string section) => section.ToLowerInvariant() switch
-    { "desktop" or "桌面整理" or "桌面集" or "桌面" => "Desktop", "settings" or "设置" or "偏好设置" => "Settings", "about" or "关于" => "About", _ => "Launchpad" };
+    { "settings" or "设置" or "偏好设置" => "Settings", "about" or "关于" => "About", _ => "Launchpad" };
 
     public void Navigate(string section)
     {
         CancelPendingHide();
         _section = NormalizeSection(section); _page = 0;
+        if (_section == "Launchpad") _category = "全部应用";
         if (!IsVisible) Show();
         Render(); Activate();
     }
@@ -187,12 +191,14 @@ public sealed class ControlCenterWindow : Window
         sideBorder.SetResourceReference(Border.BorderBrushProperty, "BorderBrush"); sideBorder.SetResourceReference(Border.BackgroundProperty, "SidebarBrush");
         Grid.SetRow(sideBorder, 1); _frame.Children.Add(sideBorder);
         var sideGrid = new Grid(); sideGrid.RowDefinitions.Add(new RowDefinition()); sideGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        sideBorder.Child = sideGrid; sideGrid.Children.Add(_sidebar);
+        sideBorder.Child = sideGrid;
+        var sidebarScroll = new ScrollViewer { Content = _sidebar, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled };
+        sidebarScroll.Resources[typeof(ScrollBar)] = CenterStyles.ScrollBarStyle(); sideGrid.Children.Add(sidebarScroll);
         var footer = new StackPanel(); Grid.SetRow(footer, 1); sideGrid.Children.Add(footer);
         var shortcut = Text("Ctrl + Alt + Space", 10, FontWeights.Normal, true);
         var shortcutCard = new Border { CornerRadius = new CornerRadius(7, 12, 7, 12), Padding = new Thickness(9, 7, 9, 7), Margin = new Thickness(7, 0, 7, 11), Child = shortcut };
         shortcutCard.SetResourceReference(Border.BackgroundProperty, "CardBrush"); footer.Children.Add(shortcutCard);
-        var version = Text("v" + (typeof(AppController).Assembly.GetName().Version?.ToString(3) ?? "0.6.0"), 10, FontWeights.Normal, true); version.Margin = new Thickness(16, 0, 0, 0); footer.Children.Add(version);
+        var version = Text("v" + (typeof(AppController).Assembly.GetName().Version?.ToString(3) ?? "0.10.0"), 10, FontWeights.Normal, true); version.Margin = new Thickness(16, 0, 0, 0); footer.Children.Add(version);
         _body.Margin = new Thickness(38, 24, 38, 24);
         Grid.SetRow(_body, 1); Grid.SetColumn(_body, 1); _frame.Children.Add(_body);
         _body.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
@@ -210,6 +216,8 @@ public sealed class ControlCenterWindow : Window
 
     private void Render()
     {
+        if (_category != "全部应用" && !_controller.State.Categories.Contains(_category)) _category = "全部应用";
+        if (_section == "Launchpad") RebuildApplicationGroups();
         _fontPreview = null; _fontPreviewInfo = null;
         _settingsRoot = null; _settingsGroup = null;
         _categoryCounts.Clear();
@@ -225,7 +233,7 @@ public sealed class ControlCenterWindow : Window
         _categories = new() { Margin = new Thickness(0, 0, 0, 18) };
         var heading = new Grid { Margin = new Thickness(0, 0, 0, 23) };
         heading.ColumnDefinitions.Add(new ColumnDefinition()); heading.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        var words = new StackPanel(); _title.FontSize = 28; _title.SetResourceReference(TextBlock.FontWeightProperty, "UiEmphasisWeight"); _title.SetResourceReference(TextBlock.FontFamilyProperty, "UiTextFamily");
+        var words = new StackPanel(); _title.FontSize = 28; _title.TextTrimming = TextTrimming.CharacterEllipsis; _title.SetResourceReference(TextBlock.FontWeightProperty, "UiEmphasisWeight"); _title.SetResourceReference(TextBlock.FontFamilyProperty, "UiTextFamily");
         _title.Tag = "PageHeading";
         _subtitle.SetResourceReference(TextBlock.ForegroundProperty, "MutedBrush"); _subtitle.FontSize = 12;
         words.Children.Add(_title); words.Children.Add(_subtitle); heading.Children.Add(words);
@@ -237,7 +245,7 @@ public sealed class ControlCenterWindow : Window
         {
             case "Settings": BuildSettings(); break;
             case "About": BuildAbout(); break;
-            default: BuildApps(_section == "Desktop"); break;
+            default: BuildApps(false); break;
         }
         toolRail.Visibility = _tools.Children.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
     }
@@ -245,8 +253,16 @@ public sealed class ControlCenterWindow : Window
     private void BuildSidebar()
     {
         _sidebar.Children.Clear();
-        AddNavCaption("工作区");
-        AddNav("Launchpad", "\uE71D", "应用库"); AddNav("Desktop", "\uE8FC", "桌面集");
+        AddNav("Launchpad", "\uE71D", "应用");
+        if (_controller.State.Categories.Count > 0) AddNavCaption("栏目");
+        foreach (var category in _controller.State.Categories)
+        {
+            var captured = category;
+            var button = AddNav("Launchpad", "\uE8B7", captured, captured);
+            button.ContextMenu = CategoryMenu(captured); EnableCategoryDrop(button, captured);
+        }
+        var add = ActionButton("新建栏目", CreateCategory); add.Margin = new Thickness(7, 2, 7, 0);
+        add.HorizontalAlignment = HorizontalAlignment.Stretch; _sidebar.Children.Add(add);
         var divider = new Border { Height = .5, Margin = new Thickness(16, 16, 16, 19) }; divider.SetResourceReference(Border.BackgroundProperty, "BorderBrush"); _sidebar.Children.Add(divider);
         AddNavCaption("选项");
         AddNav("Settings", "\uE713", "偏好设置"); AddNav("About", "\uE946", "关于");
@@ -258,10 +274,10 @@ public sealed class ControlCenterWindow : Window
         caption.SetResourceReference(TextBlock.ForegroundProperty, "CaptionBrush"); _sidebar.Children.Add(caption);
     }
 
-    private void AddNav(string section, string glyph, string label)
+    private Button AddNav(string section, string glyph, string label, string? category = null)
     {
-        var button = ActionButton(label, () => { _section = section; _page = 0; Render(); });
-        var selected = _section == section;
+        var button = ActionButton(label, () => { _section = section; if (section == "Launchpad") _category = category ?? "全部应用"; _page = 0; Render(); });
+        var selected = _section == section && (section != "Launchpad" || _category == (category ?? "全部应用"));
         var content = new Grid { Width = 128 }; content.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(9) }); content.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(34) }); content.ColumnDefinitions.Add(new ColumnDefinition());
         var spine = new Border { Width = 2.5, Height = 18, CornerRadius = new CornerRadius(1.25), HorizontalAlignment = HorizontalAlignment.Left, VerticalAlignment = VerticalAlignment.Center, Visibility = selected ? Visibility.Visible : Visibility.Hidden };
         spine.SetResourceReference(Border.BackgroundProperty, "AccentBrush"); content.Children.Add(spine);
@@ -269,17 +285,21 @@ public sealed class ControlCenterWindow : Window
         icon.SetResourceReference(TextBlock.ForegroundProperty, selected ? "AccentBrush" : "MutedBrush");
         var badge = new Border { Width = 28, Height = 28, CornerRadius = new CornerRadius(8, 12, 8, 12), HorizontalAlignment = HorizontalAlignment.Left, Child = icon };
         badge.SetResourceReference(Border.BackgroundProperty, selected ? "AccentSoftBrush" : "CardBrush"); Grid.SetColumn(badge, 1); content.Children.Add(badge);
-        var name = Text(label, 13, selected ? FontWeights.SemiBold : FontWeights.Normal); name.Tag = "NavigationLabel"; name.VerticalAlignment = VerticalAlignment.Center; Grid.SetColumn(name, 2); content.Children.Add(name); button.Content = content;
+        var name = Text(label, 13, selected ? FontWeights.SemiBold : FontWeights.Normal); name.Tag = "NavigationLabel"; name.VerticalAlignment = VerticalAlignment.Center; name.TextTrimming = TextTrimming.CharacterEllipsis; Grid.SetColumn(name, 2); content.Children.Add(name); button.Content = content;
+        button.Tag = category == null ? "Navigation:" + section : "CategoryNavigation:" + category;
+        if (category != null) button.ToolTip = category + "\n右键可重命名或删除栏目";
         System.Windows.Automation.AutomationProperties.SetName(button, label);
         button.HorizontalContentAlignment = HorizontalAlignment.Left; button.Padding = new Thickness(9, 9, 10, 9); button.Margin = new Thickness(0, 0, 0, 8); button.Background = Brushes.Transparent; button.BorderBrush = Brushes.Transparent;
         ApplyButtonTemplate(button, new CornerRadius(11, 20, 20, 11), navigation: true);
         if (selected) { button.SetResourceReference(BackgroundProperty, "SelectionBrush"); button.SetResourceReference(BorderBrushProperty, "GlassHighlightBrush"); }
         _sidebar.Children.Add(button);
+        return button;
     }
 
     private void BuildApps(bool desktop)
     {
-        _title.Text = desktop ? "桌面集" : "应用库";
+        _title.Text = _category == "全部应用" ? "应用" : _category;
+        _title.ToolTip = _title.Text;
         _subtitle.Text = "";
         _tools.Children.Add(ActionButton("添加应用", AddApplication, true));
         _tools.Children.Add(ActionButton("刷新", async () => { try { _status.Text = "正在扫描应用…"; await _controller.RefreshAppsAsync(); Render(); } catch (Exception ex) { ShowError(ex); } }));
@@ -304,10 +324,10 @@ public sealed class ControlCenterWindow : Window
             RenderAppGrid(desktop);
         };
         searchGrid.Children.Add(field); searchBox.Child = searchGrid; filters.Children.Add(searchBox);
-        foreach (var category in new[] { "全部应用", "Dock 已固定" }.Concat(_controller.State.Categories).Distinct())
+        foreach (var category in new[] { "全部应用" }.Concat(_controller.State.Categories).Distinct())
         {
-            var captured = category; var chip = ActionButton(category == "全部应用" ? "全部" : category == "Dock 已固定" ? "已固定" : category, () => { _category = captured; _page = 0; RenderAppGrid(desktop); UpdateCategoryStyles(); });
-            var label = category == "全部应用" ? "全部" : category == "Dock 已固定" ? "已固定" : category;
+            var captured = category; var chip = ActionButton(category == "全部应用" ? "全部" : category, () => { _category = captured; _page = 0; Render(); });
+            var label = category == "全部应用" ? "全部" : category;
             var chipContent = new StackPanel { Orientation = Orientation.Horizontal };
             chipContent.Children.Add(Text(label, 11));
             var count = Text("", 9, FontWeights.Medium, true); count.VerticalAlignment = VerticalAlignment.Center; count.Margin = new Thickness(7, 0, 0, 0); count.MinWidth = 8;
@@ -315,33 +335,23 @@ public sealed class ControlCenterWindow : Window
             System.Windows.Automation.AutomationProperties.SetName(chip, label);
             chip.Tag = category; chip.Padding = new Thickness(9, 7, 9, 7); chip.Margin = new Thickness(0, 0, 6, 7); chip.FontSize = 11;
             ApplyButtonTemplate(chip, new CornerRadius(8, 15, 8, 15));
-            if (category != "全部应用" && category != "Dock 已固定")
+            if (category != "全部应用")
             {
-                chip.AllowDrop = true;
-                chip.DragOver += (_, e) => { e.Effects = e.Data.GetDataPresent(AppDragFormat) ? LocalDragEffect(e) : DragDropEffects.None; e.Handled = true; };
-                chip.Drop += (_, e) => { if (GetDragged(e) is { } app) { Catalog.AssignCategory(app, captured); _controller.Save(); RenderAppGrid(desktop); } e.Handled = true; };
+                EnableCategoryDrop(chip, captured); chip.ContextMenu = CategoryMenu(captured);
+                chip.ToolTip = "右键可重命名或删除栏目";
             }
             _categories.Children.Add(chip);
         }
-        var newGroup = ActionButton("新建分组", CreateCategory); newGroup.FontSize = 11; newGroup.Padding = new Thickness(10, 7, 10, 7);
-        var createContent = new StackPanel { Orientation = Orientation.Horizontal }; var plus = Glyph("\uE710", 10); plus.Margin = new Thickness(0, 0, 6, 0); createContent.Children.Add(plus); createContent.Children.Add(Text("分组", 11)); newGroup.Content = createContent;
-        System.Windows.Automation.AutomationProperties.SetName(newGroup, "新建分组");
+        var newGroup = ActionButton("新建栏目", CreateCategory); newGroup.FontSize = 11; newGroup.Padding = new Thickness(10, 7, 10, 7);
+        var createContent = new StackPanel { Orientation = Orientation.Horizontal }; var plus = Glyph("\uE710", 10); plus.Margin = new Thickness(0, 0, 6, 0); createContent.Children.Add(plus); createContent.Children.Add(Text("栏目", 11)); newGroup.Content = createContent;
+        System.Windows.Automation.AutomationProperties.SetName(newGroup, "新建栏目");
         ApplyButtonTemplate(newGroup, new CornerRadius(8, 15, 8, 15)); _categories.Children.Add(newGroup); filters.Children.Add(_categories); UpdateCategoryStyles();
-        if (desktop)
-        {
-            _tools.Children.Add(ActionButton("桌面图标", ToggleDesktopIcons));
-        }
         RenderAppGrid(desktop);
     }
 
     private void UpdateCategoryStyles()
     {
-        var visible = _controller.State.Apps.Where(app => !app.Hidden);
-        if (_section == "Desktop") visible = visible.Where(IsDesktopEntry);
-        if (!string.IsNullOrWhiteSpace(_query)) visible = visible.Where(app => app.Name.Contains(_query, StringComparison.CurrentCultureIgnoreCase) || app.LaunchPath.Contains(_query, StringComparison.OrdinalIgnoreCase));
-        var source = visible.ToArray();
-        var categories = source.GroupBy(app => app.Category).ToDictionary(group => group.Key, group => group.Count(), StringComparer.Ordinal);
-        var pins = _controller.State.PinnedIds.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var source = _applicationGroups.Select(group => group.Entries.Where(MatchesSearch).ToArray()).Where(group => group.Length > 0).ToArray();
         foreach (var button in _categories.Children.OfType<Button>())
         {
             if (button.Tag is not string category) continue;
@@ -350,29 +360,41 @@ public sealed class ControlCenterWindow : Window
             button.SetResourceReference(BorderBrushProperty, selected ? "AccentBrush" : "BorderBrush");
             button.SetResourceReference(FontWeightProperty, selected ? "UiEmphasisWeight" : "UiTextWeight");
             if (button.Content is StackPanel labelStack && labelStack.Children.OfType<TextBlock>().FirstOrDefault() is { } label) label.SetResourceReference(TextBlock.FontWeightProperty, selected ? "UiEmphasisWeight" : "UiTextWeight");
-            var count = category == "全部应用" ? source.Length : category == "Dock 已固定" ? source.Count(app => pins.Contains(app.Id)) : categories.GetValueOrDefault(category);
+            var count = category == "全部应用" ? source.Length : source.Count(group => group.Any(app => app.Category == category));
             if (_categoryCounts.TryGetValue(category, out var countText)) { countText.Text = count.ToString(); countText.SetResourceReference(TextBlock.ForegroundProperty, selected ? "TextBrush" : "CaptionBrush"); }
-            System.Windows.Automation.AutomationProperties.SetHelpText(button, $"{count} 个{(_section == "Desktop" ? "快捷方式" : "应用")}");
+            System.Windows.Automation.AutomationProperties.SetHelpText(button, $"{count} 个应用");
         }
     }
 
     private IEnumerable<AppEntry> FilteredApps(bool desktop)
     {
-        var apps = _controller.State.Apps.Where(x => !x.Hidden);
-        if (desktop) apps = apps.Where(IsDesktopEntry);
-        if (_category == "Dock 已固定") apps = apps.Where(x => _controller.State.PinnedIds.Contains(x.Id));
-        else if (_category != "全部应用") apps = apps.Where(x => x.Category == _category);
-        if (!string.IsNullOrWhiteSpace(_query)) apps = apps.Where(x => x.Name.Contains(_query, StringComparison.CurrentCultureIgnoreCase) || x.LaunchPath.Contains(_query, StringComparison.OrdinalIgnoreCase));
-        return apps;
+        return _applicationGroups.Select(group => group.Entries.FirstOrDefault(app => MatchesSearch(app) && (_category == "全部应用" || app.Category == _category)))
+            .OfType<AppEntry>().OrderBy(app => _applicationOrder.GetValueOrDefault(app.Id, int.MaxValue));
     }
 
-    private static bool IsDesktopEntry(AppEntry entry)
+    private bool MatchesSearch(AppEntry app) => !app.Hidden && app.IsAvailable && (string.IsNullOrWhiteSpace(_query)
+        || app.Name.Contains(_query, StringComparison.CurrentCultureIgnoreCase) || app.LaunchPath.Contains(_query, StringComparison.OrdinalIgnoreCase));
+
+    private void RebuildApplicationGroups()
     {
-        if (entry.DesktopPaths.Any(File.Exists)) return true;
-        if (entry.Source.Contains("Desktop", StringComparison.OrdinalIgnoreCase) || entry.Source.Contains("桌面", StringComparison.Ordinal)) return true;
-        var user = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
-        var common = Environment.GetFolderPath(Environment.SpecialFolder.CommonDesktopDirectory);
-        return (!string.IsNullOrEmpty(user) && entry.LaunchPath.StartsWith(user + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)) || (!string.IsNullOrEmpty(common) && entry.LaunchPath.StartsWith(common + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase));
+        _applicationGroups = ApplicationPresentation.Group(_controller.State.Apps);
+        _variantsById = _applicationGroups.SelectMany(group => group.Entries.Select(entry => (entry.Id, group.Entries)))
+            .ToDictionary(pair => pair.Id, pair => pair.Entries, StringComparer.OrdinalIgnoreCase);
+        _applicationOrder = _controller.State.Apps.Select((entry, index) => (entry.Id, index)).ToDictionary(pair => pair.Id, pair => pair.index, StringComparer.OrdinalIgnoreCase);
+    }
+
+    private IReadOnlyList<AppEntry> Variants(AppEntry app) => _variantsById.TryGetValue(app.Id, out var variants) ? variants : [app];
+
+    private void AssignColumn(AppEntry app, string category)
+    {
+        foreach (var variant in Variants(app)) Catalog.AssignCategory(variant, category);
+        _controller.Save(); Render();
+    }
+
+    private void RemoveApplication(AppEntry app)
+    {
+        foreach (var variant in Variants(app)) { variant.Hidden = true; _controller.State.PinnedIds.Remove(variant.Id); }
+        _controller.Save(); Render();
     }
 
     private void RenderAppGrid(bool desktop)
@@ -410,14 +432,29 @@ public sealed class ControlCenterWindow : Window
             var number = Text($"{_page + 1} / {pages}", 11, FontWeights.Normal, true); number.Margin = new Thickness(16, 9, 16, 0); pager.Children.Add(number);
             var next = ActionButton("›", () => { _page++; RenderAppGrid(desktop); }); next.IsEnabled = _page < pages - 1; pager.Children.Add(next);
         }
-        _status.Text = $"{apps.Count} 个{(desktop ? "快捷方式" : "应用")}  ·  已固定 {_controller.State.PinnedIds.Count}";
+        var pins = _controller.State.PinnedIds.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var pinnedApplications = _applicationGroups.Count(group => group.Entries.Any(entry => !entry.Hidden && entry.IsAvailable && pins.Contains(entry.Id)));
+        _status.Text = $"{apps.Count} 个应用  ·  已固定 {pinnedApplications}";
         UpdateCategoryStyles();
     }
 
     private FrameworkElement CreateAppTile(AppEntry app, bool desktop, AppGridMetrics metrics)
     {
+        var variants = Variants(app);
+        var launchModes = variants.Where(variant => !variant.Hidden && variant.IsAvailable).ToArray();
         var vm = new AppTileViewModel(app);
         var tile = new AppTileButton { Margin = new Thickness(5), Padding = new Thickness(7, 9, 7, 5), Height = metrics.TileHeight, Background = Brushes.Transparent, BorderThickness = new Thickness(0), Cursor = Cursors.Hand, DataContext = vm, ToolTip = app.Name };
+        if (_controller.State.Apps.Any(other => !other.Hidden && other.IsAvailable && other.Id != app.Id && string.Equals(other.Name, app.Name, StringComparison.CurrentCultureIgnoreCase)))
+        {
+            static string Brief(string value) => value.Length <= 360 ? value : value[..180] + "…" + value[^179..];
+            var target = string.IsNullOrEmpty(app.ExecutablePath) ? app.LaunchPath : app.ExecutablePath;
+            var details = app.Name + "\n位置：" + Brief(target);
+            if (!string.IsNullOrWhiteSpace(app.Arguments)) details += "\n参数：" + Brief(app.Arguments);
+            if (launchModes.Length > 1) details += $"\n{launchModes.Length} 种启动方式，右键选择";
+            var explanation = Text(details, 12); explanation.MaxWidth = 420; explanation.TextWrapping = TextWrapping.Wrap;
+            tile.ToolTip = new System.Windows.Controls.ToolTip { Content = explanation, MaxWidth = 460 };
+            System.Windows.Automation.AutomationProperties.SetHelpText(tile, "同名的独立启动入口。" + details);
+        }
         ApplyButtonTemplate(tile, new CornerRadius(14, 23, 14, 23), tile: true);
         var content = new StackPanel { HorizontalAlignment = HorizontalAlignment.Stretch };
         var image = new Image { Width = 48, Height = 48, Stretch = Stretch.Uniform, SnapsToDevicePixels = true };
@@ -432,7 +469,7 @@ public sealed class ControlCenterWindow : Window
         name.TextAlignment = TextAlignment.Center; name.TextWrapping = TextWrapping.Wrap; name.TextTrimming = TextTrimming.CharacterEllipsis;
         name.LineHeight = metrics.LineHeight; name.LineStackingStrategy = LineStackingStrategy.BlockLineHeight;
         name.Height = metrics.NameHeight; name.MaxHeight = metrics.NameHeight; name.Margin = new Thickness(0, 10, 0, 0); content.Children.Add(name);
-        var dot = new Ellipse { Width = 3, Height = 3, Margin = new Thickness(0, 3, 0, 0), Opacity = _controller.State.PinnedIds.Contains(app.Id) ? 1 : 0 }; dot.SetResourceReference(Shape.FillProperty, "AccentBrush"); content.Children.Add(dot);
+        var dot = new Ellipse { Width = 3, Height = 3, Margin = new Thickness(0, 3, 0, 0), Opacity = variants.Any(variant => _controller.State.PinnedIds.Contains(variant.Id)) ? 1 : 0 }; dot.SetResourceReference(Shape.FillProperty, "AccentBrush"); content.Children.Add(dot);
         tile.Content = content; tile.Click += (_, _) => _controller.Launch(app);
         var lift = new TranslateTransform(); content.RenderTransform = lift;
         void Lift(double y)
@@ -452,27 +489,55 @@ public sealed class ControlCenterWindow : Window
         tile.AllowDrop = true; tile.DragOver += (_, e) => { e.Effects = e.Data.GetDataPresent(AppDragFormat) ? LocalDragEffect(e) : DragDropEffects.None; e.Handled = true; };
         tile.Drop += (_, e) =>
         {
-            if (GetDragged(e) is { } moved && moved.Id != app.Id)
+            if (GetDragged(e) is { } moved && !variants.Any(variant => variant.Id == moved.Id))
             {
-                var list = _controller.State.Apps; list.Remove(moved); Catalog.AssignCategory(moved, app.Category); list.Insert(Math.Max(0, list.IndexOf(app)), moved); _controller.Save(); RenderAppGrid(desktop);
+                var list = _controller.State.Apps;
+                var moving = Variants(moved).OrderBy(variant => _applicationOrder.GetValueOrDefault(variant.Id, int.MaxValue)).ToArray();
+                foreach (var variant in moving) list.Remove(variant);
+                // Reordering the unified list never silently changes a manual column.
+                if (_category != "全部应用") foreach (var variant in moving) Catalog.AssignCategory(variant, _category);
+                list.InsertRange(Math.Max(0, list.IndexOf(app)), moving); _controller.Save(); Render();
             }
             e.Handled = true;
         };
         var menu = new ContextMenu { Padding = new Thickness(5), BorderThickness = new Thickness(.8) };
         menu.SetResourceReference(Control.BackgroundProperty, "PopupBrush"); menu.SetResourceReference(Control.ForegroundProperty, "TextBrush"); menu.SetResourceReference(Control.BorderBrushProperty, "BorderBrush");
         menu.Items.Add(Menu("打开应用", () => _controller.Launch(app)));
-        var pinned = _controller.State.PinnedIds.Contains(app.Id);
-        menu.Items.Add(Menu(pinned ? "从 Dock 移除" : "固定到 Dock", () => { if (pinned) _controller.Unpin(app); else _controller.Pin(app); }));
-        var groups = new MenuItem { Header = "移到分组" };
-        foreach (var category in _controller.State.Categories) { var captured = category; groups.Items.Add(Menu(category, () => { Catalog.AssignCategory(app, captured); _controller.Save(); RenderAppGrid(desktop); })); }
+        if (launchModes.Length > 1)
+        {
+            var modes = new MenuItem { Header = "启动方式" };
+            for (var index = 0; index < launchModes.Length; index++)
+            {
+                var variant = launchModes[index];
+                var source = variant.Source switch { "StartMenu" => "开始菜单", "Desktop" => "桌面", "AppsFolder" => "系统注册", "Manual" => "手动入口", _ => "启动入口" };
+                var parameters = string.IsNullOrWhiteSpace(variant.Arguments) ? "默认参数" : variant.Arguments.Length <= 80 ? variant.Arguments : variant.Arguments[..60] + "…" + variant.Arguments[^19..];
+                var mode = Menu($"{index + 1}. {source} · {parameters}", () => _controller.LaunchNewInstance(variant));
+                mode.Tag = variant;
+                var explanation = Text("位置：" + variant.LaunchPath + (string.IsNullOrEmpty(variant.Arguments) ? "" : "\n参数：" + variant.Arguments)
+                    + (string.IsNullOrEmpty(variant.WorkingDirectory) ? "" : "\n工作目录：" + variant.WorkingDirectory), 12);
+                explanation.TextWrapping = TextWrapping.Wrap; explanation.MaxWidth = 420; explanation.MaxHeight = 240;
+                mode.ToolTip = new System.Windows.Controls.ToolTip { Content = explanation, MaxWidth = 460 };
+                modes.Items.Add(mode);
+            }
+            menu.Items.Add(modes);
+            System.Windows.Automation.AutomationProperties.SetHelpText(tile, $"{launchModes.Length} 种启动方式，可在右键菜单中选择。原始参数保留。");
+        }
+        var pinned = variants.Any(variant => _controller.State.PinnedIds.Contains(variant.Id));
+        menu.Items.Add(Menu(pinned ? "从 Dock 移除" : "固定到 Dock", () =>
+        {
+            if (!pinned) _controller.Pin(app);
+            else { foreach (var variant in variants) _controller.State.PinnedIds.Remove(variant.Id); _controller.Save(); }
+        }));
+        var groups = new MenuItem { Header = "放入栏目" };
+        groups.Items.Add(Menu("不放入栏目", () => AssignColumn(app, "")));
+        foreach (var category in _controller.State.Categories) { var captured = category; groups.Items.Add(Menu(category, () => AssignColumn(app, captured))); }
         menu.Items.Add(groups);
         menu.Items.Add(Menu("更换图标…", () => _controller.ChooseIcon(app, this)));
         var restoreIcon = Menu("恢复原图标", () => _controller.SetCustomIcon(app, "")); restoreIcon.IsEnabled = !string.IsNullOrEmpty(app.CustomIconPath); menu.Items.Add(restoreIcon);
-        if (desktop) menu.Items.Add(Menu("在应用库中查看", () => { _section = "Launchpad"; _category = app.Category; _query = app.Name; Render(); }));
         menu.Items.Add(new Separator()); menu.Items.Add(Menu("删除管理记录…", () =>
         {
             if (MessageBox.Show(this, $"从 LumaDock 隐藏“{app.Name}”？\n应用、桌面快捷方式和原始文件都将保留。可在数据管理中恢复隐藏记录。", "删除管理记录", MessageBoxButton.OKCancel, MessageBoxImage.Question) == MessageBoxResult.OK)
-            { _controller.Remove(app); RenderAppGrid(desktop); }
+            { RemoveApplication(app); }
         }));
         tile.ContextMenu = menu; return tile;
     }
@@ -488,12 +553,56 @@ public sealed class ControlCenterWindow : Window
 
     private void CreateCategory()
     {
-        var name = AskText("新建分组", "分组名称", "");
+        var name = AskText("新建栏目", "栏目名称", "", "创建");
         if (string.IsNullOrWhiteSpace(name)) return;
-        name = name.Trim();
-        if (name.Length > 40) { _controller.Notify("分组名称最多 40 个字符。"); return; }
-        if (new[] { "全部应用", "Dock 已固定" }.Contains(name) || _controller.State.Categories.Contains(name)) { _controller.Notify("已有同名分组。"); return; }
-        _controller.State.Categories.Add(name); _category = name; _page = 0; _controller.Save(); Render();
+        if (!TryCreateCategory(name)) _controller.Notify("请使用 1–40 个字符，并避开已有名称。列名“全部”由应用保留。");
+    }
+
+    private bool TryCreateCategory(string name)
+    {
+        if (!Catalog.CreateCategory(_controller.State, name)) return false;
+        _section = "Launchpad"; _category = name.Trim(); _page = 0; _controller.Save(); Render(); return true;
+    }
+
+    private void RenameCategory(string category)
+    {
+        var name = AskText("重命名栏目", "栏目名称", category);
+        if (name == null || string.Equals(name.Trim(), category, StringComparison.Ordinal)) return;
+        if (!TryRenameCategory(category, name)) _controller.Notify("请使用 1–40 个字符，并避开已有名称。列名“全部”由应用保留。");
+    }
+
+    private bool TryRenameCategory(string category, string name)
+    {
+        if (!Catalog.RenameCategory(_controller.State, category, name)) return false;
+        if (_category == category) _category = name.Trim();
+        _controller.Save(); Render(); return true;
+    }
+
+    private void DeleteCategory(string category)
+    {
+        if (!Catalog.DeleteCategory(_controller.State, category)) return;
+        if (_category == category) _category = "全部应用";
+        _page = 0; _controller.Save(); Render();
+    }
+
+    private ContextMenu CategoryMenu(string category)
+    {
+        var menu = new ContextMenu();
+        menu.Items.Add(Menu("重命名栏目…", () => RenameCategory(category)));
+        var remove = Menu("删除栏目", () => DeleteCategory(category));
+        remove.ToolTip = "应用仍保留在“全部”中，不改变原文件或 Dock 固定状态。";
+        menu.Items.Add(remove); return menu;
+    }
+
+    private void EnableCategoryDrop(Button button, string category)
+    {
+        button.AllowDrop = true;
+        button.DragOver += (_, e) => { e.Effects = e.Data.GetDataPresent(AppDragFormat) ? LocalDragEffect(e) : DragDropEffects.None; e.Handled = true; };
+        button.Drop += (_, e) =>
+        {
+            if (GetDragged(e) is { } app) AssignColumn(app, category);
+            e.Handled = true;
+        };
     }
 
     private void ToggleDesktopIcons()
@@ -531,25 +640,27 @@ public sealed class ControlCenterWindow : Window
         SliderRow(stack, "流动幅度", 0, 1, settings.GlassFlowStrength, value => settings.GlassFlowStrength = value, value => $"{value:P0}");
         if (!settings.LiveGlass) SliderRow(stack, "静态折射清晰度", .1, 1, settings.GlassClarity, value => settings.GlassClarity = value, value => $"{value:P0}");
         SelectRow(stack, "主题", "", new[] { ("System", "跟随系统"), ("Dark", "深色"), ("Light", "浅色") }, settings.Theme, value => settings.Theme = value);
-        SliderRow(stack, "Dock 透明度", 0.55, 1, settings.Opacity, value => settings.Opacity = value, value => $"{value:P0}");
+        SliderRow(stack, "Dock 浓度", .15, 1, settings.Opacity, value => settings.Opacity = value, value => $"{value:P0}", "数值越低，底座越通透");
         SliderRow(stack, "圆角", 8, 36, settings.CornerRadius, value => settings.CornerRadius = value, value => $"{value:0} px");
         SliderRow(stack, "图标大小", 32, 80, settings.IconSize, value => settings.IconSize = value, value => $"{value:0} px");
         SliderRow(stack, "图标间距", 3, 24, settings.Spacing, value => settings.Spacing = value, value => $"{value:0} px");
         var dockHeading = Section(stack, "Dock", "");
         DockShapeRow(stack);
+        ToggleRow(stack, "图标倒影", "淡淡映在底座上；省电与高对比度时暂时关闭", settings.IconReflection, value => settings.IconReflection = value);
+        SliderRow(stack, "倒影强度", 0, .5, settings.ReflectionStrength, value => settings.ReflectionStrength = value, value => $"{value:P0}");
         SelectRow(stack, "位置", "", new[] { ("Bottom", "底部"), ("Left", "左侧"), ("Right", "右侧"), ("Top", "顶部") }, settings.Position, value => settings.Position = value);
         var monitors = new List<(string, string)> { ("", "主显示器（自动）") };
         try { monitors.AddRange(MonitorService.GetMonitors().Select(m => (m.DeviceName, m.Label))); } catch (Exception ex) { Debug.WriteLine(ex); }
         SelectRow(stack, "显示器", "断开后使用主显示器", monitors.ToArray(), settings.MonitorDevice, value => settings.MonitorDevice = value);
         ToggleRow(stack, "自动隐藏", "鼠标靠近 Dock 边缘时重新显示", settings.AutoHide, value => settings.AutoHide = value);
         SliderRow(stack, "悬停放大强度", 0, 1, settings.AnimationStrength, value => settings.AnimationStrength = value, value => $"{value:P0}");
-        var fontHeading = Section(stack, "字体与文字", "侧栏、分类与应用名称一起调整，仅对 LumaDock 生效。");
+        var fontHeading = Section(stack, "字体与文字", "侧栏、栏目与应用名称一起调整，仅对 LumaDock 生效。");
         ToggleRow(stack, "跟随 Windows 图标字体", "读取系统的字体与粗细；名称字号随系统变化", settings.FollowSystemIconFont, value => { settings.FollowSystemIconFont = value; Dispatcher.BeginInvoke(() => Render()); });
         if (!settings.FollowSystemIconFont)
         {
             NameFontFamilyRow(stack);
             SliderRow(stack, "名称字号", 10, 40, settings.NameFontSize, value => { settings.NameFontSize = value; UpdateNameFontPreview(); }, value => $"{value * .75:0.#} 磅");
-            ToggleRow(stack, "加粗", "同时用于侧栏、分类和应用名称", settings.NameFontBold, value => { settings.NameFontBold = value; UpdateNameFontPreview(); });
+            ToggleRow(stack, "加粗", "同时用于侧栏、栏目和应用名称", settings.NameFontBold, value => { settings.NameFontBold = value; UpdateNameFontPreview(); });
             ToggleRow(stack, "斜体", "", settings.NameFontItalic, value => { settings.NameFontItalic = value; UpdateNameFontPreview(); });
         }
         TextColorRow(stack);
@@ -559,6 +670,7 @@ public sealed class ControlCenterWindow : Window
         Section(stack, "应用整理", "");
         SelectRow(stack, "每行应用数", "", Enumerable.Range(4, 7).Select(i => (i.ToString(), i + " 个")).ToArray(), settings.Columns.ToString(), value => settings.Columns = int.Parse(value));
         ActionRow(stack, "已隐藏的应用", $"{_controller.State.Apps.Count(a => a.Hidden)} 个应用", "恢复全部", () => { foreach (var app in _controller.State.Apps) app.Hidden = false; _controller.Save(); BuildSettingsRefresh(); });
+        ActionRow(stack, "Windows 桌面图标", "主动显示或隐藏，可用同一按钮或 Windows 桌面菜单恢复", "显示 / 隐藏", ToggleDesktopIcons);
         Section(stack, "性能与启动", "");
         ToggleRow(stack, "界面动画", "", settings.Animations, value => settings.Animations = value);
         ToggleRow(stack, "省电模式", "减少动画与悬停效果", settings.PowerSaver, value => settings.PowerSaver = value);
@@ -581,7 +693,7 @@ public sealed class ControlCenterWindow : Window
         var actions = new WrapPanel { Margin = new Thickness(0, 12, 0, 4) }; SettingsContainer(stack).Children.Add(actions);
         actions.Children.Add(ActionButton("导出配置", () => { var dialog = new SaveFileDialog { Filter = "LumaDock JSON|*.json", FileName = "LumaDock-config.json" }; if (dialog.ShowDialog(this) == true) Safe(() => _controller.Export(dialog.FileName)); }));
         actions.Children.Add(ActionButton("导入配置…", () => { var dialog = new OpenFileDialog { Filter = "LumaDock JSON|*.json" }; if (dialog.ShowDialog(this) == true && MessageBox.Show(this, "用所选配置替换当前整理结果与偏好？\n开机启动和桌面显示设置不会随导入而更改。建议先导出当前配置。", "导入配置", MessageBoxButton.OKCancel, MessageBoxImage.Question) == MessageBoxResult.OK) Safe(() => { _controller.Import(dialog.FileName); Render(); }); }));
-        actions.Children.Add(ActionButton("恢复默认值…", () => { if (MessageBox.Show(this, "恢复 LumaDock 默认配置？应用分组和 Dock 排列将重置。\n不会移动文件，也不会改变开机启动或桌面图标显示。", "恢复默认值", MessageBoxButton.OKCancel, MessageBoxImage.Question) == MessageBoxResult.OK) Safe(() => { _controller.Reset(); _category = "全部应用"; Render(); }); }));
+        actions.Children.Add(ActionButton("恢复默认值…", () => { if (MessageBox.Show(this, "恢复 LumaDock 默认配置？栏目和 Dock 排列将重置。\n不会移动文件，也不会改变开机启动或桌面图标显示。", "恢复默认值", MessageBoxButton.OKCancel, MessageBoxImage.Question) == MessageBoxResult.OK) Safe(() => { _controller.Reset(); _category = "全部应用"; Render(); }); }));
         void JumpTo(FrameworkElement heading) => scroll.ScrollToVerticalOffset(Math.Max(0, heading.TranslatePoint(new Point(), stack).Y - 18));
         _tools.Children.Add(ActionButton("材质", () => JumpTo(materialHeading)));
         _tools.Children.Add(ActionButton("文字", () => JumpTo(fontHeading)));
@@ -836,9 +948,9 @@ public sealed class ControlCenterWindow : Window
         check.Click += (_, _) => { set(check.IsChecked == true); if (save) SaveSettings(); }; Grid.SetColumn(check, 1); row.Children.Add(check); return check;
     }
 
-    private void SliderRow(StackPanel parent, string title, double min, double max, double value, Action<double> set, Func<double, string> format)
+    private void SliderRow(StackPanel parent, string title, double min, double max, double value, Action<double> set, Func<double, string> format, string subtitle = "")
     {
-        var row = SettingRow(parent, title, ""); var group = new Grid(); group.ColumnDefinitions.Add(new ColumnDefinition()); group.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(62) });
+        var row = SettingRow(parent, title, subtitle); var group = new Grid(); group.ColumnDefinitions.Add(new ColumnDefinition()); group.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(62) });
         var slider = new Slider { Minimum = min, Maximum = max, Value = value, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 14, 0), IsMoveToPointEnabled = true, Template = CenterStyles.SliderTemplate };
         System.Windows.Automation.AutomationProperties.SetName(slider, title);
         var number = Text(format(value), 11, FontWeights.Normal, true); number.VerticalAlignment = VerticalAlignment.Center; number.HorizontalAlignment = HorizontalAlignment.Right; Grid.SetColumn(number, 1); group.Children.Add(number); group.Children.Add(slider);
@@ -859,7 +971,7 @@ public sealed class ControlCenterWindow : Window
         var icon = new Image { Source = Icon, Width = 86, Height = 86, Margin = new Thickness(0, 0, 0, 22) }; RenderOptions.SetBitmapScalingMode(icon, BitmapScalingMode.HighQuality); panel.Children.Add(icon);
         var name = Text("LumaDock", 32, FontWeights.SemiBold); name.HorizontalAlignment = HorizontalAlignment.Center; panel.Children.Add(name);
         var description = Text("桌面 Dock 与应用管理", 13, FontWeights.Normal, true); description.HorizontalAlignment = HorizontalAlignment.Center; description.Margin = new Thickness(0, 9, 0, 15); panel.Children.Add(description);
-        var version = Text("v" + (typeof(AppController).Assembly.GetName().Version?.ToString(3) ?? "0.6.0"), 11, FontWeights.Medium); version.HorizontalAlignment = HorizontalAlignment.Center;
+        var version = Text("v" + (typeof(AppController).Assembly.GetName().Version?.ToString(3) ?? "0.10.0"), 11, FontWeights.Medium); version.HorizontalAlignment = HorizontalAlignment.Center;
         var versionBadge = new Border { Child = version, HorizontalAlignment = HorizontalAlignment.Center, Padding = new Thickness(13, 6, 13, 6), CornerRadius = new CornerRadius(7, 13, 7, 13), Margin = new Thickness(0, 0, 0, 23) };
         versionBadge.SetResourceReference(Border.BackgroundProperty, "AccentSoftBrush"); panel.Children.Add(versionBadge);
         var license = Text("MIT 许可证", 12, FontWeights.Normal, true); license.HorizontalAlignment = HorizontalAlignment.Center; panel.Children.Add(license);
@@ -913,7 +1025,7 @@ public sealed class ControlCenterWindow : Window
     private void Safe(Action action) { try { action(); } catch (Exception ex) { ShowError(ex); } }
     private void ShowError(Exception ex) { Debug.WriteLine(ex); _controller.Notify(ex.Message); }
 
-    private string? AskText(string title, string hint, string initial)
+    private string? AskText(string title, string hint, string initial, string confirm = "保存")
     {
         var dialog = new Window { Owner = this, Title = title, Width = 400, Height = 245, WindowStyle = WindowStyle.None, ResizeMode = ResizeMode.NoResize, WindowStartupLocation = WindowStartupLocation.CenterOwner, ShowInTaskbar = false, FontFamily = FontFamily };
         dialog.SetResourceReference(ForegroundProperty, "TextBrush");
@@ -923,9 +1035,9 @@ public sealed class ControlCenterWindow : Window
         var heading = Text(title, 19, FontWeights.SemiBold); heading.Margin = new Thickness(0, 0, 0, 18); heading.MouseLeftButtonDown += (_, e) => { if (e.ButtonState == MouseButtonState.Pressed) dialog.DragMove(); }; stack.Children.Add(heading);
         var prompt = Text(hint, 11, FontWeights.Normal, true); stack.Children.Add(prompt);
         var inputBorder = new Border { Margin = new Thickness(0, 8, 0, 20), CornerRadius = new CornerRadius(12), Padding = new Thickness(12, 10, 12, 10), BorderThickness = new Thickness(.8) }; inputBorder.SetResourceReference(Border.BackgroundProperty, "PanelBrush"); inputBorder.SetResourceReference(Border.BorderBrushProperty, "BorderBrush"); stack.Children.Add(inputBorder);
-        var input = new TextBox { Text = initial, Background = Brushes.Transparent, BorderThickness = new Thickness(0), FontSize = 14, MaxLength = 40 }; input.SetResourceReference(Control.ForegroundProperty, "TextBrush"); var inputField = new Grid(); inputField.Children.Add(input); inputField.Children.Add(StaticCaret.Create(input)); inputBorder.Child = inputField;
+        var input = new TextBox { Text = initial, Background = Brushes.Transparent, BorderThickness = new Thickness(0), FontSize = 14, MaxLength = 40 }; input.SetResourceReference(Control.ForegroundProperty, "TextBrush"); System.Windows.Automation.AutomationProperties.SetName(input, hint); var inputField = new Grid(); inputField.Children.Add(input); inputField.Children.Add(StaticCaret.Create(input)); inputBorder.Child = inputField;
         var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right }; stack.Children.Add(buttons);
-        buttons.Children.Add(ActionButton("取消", () => dialog.DialogResult = false)); var ok = ActionButton("创建", () => dialog.DialogResult = true, true); ok.IsDefault = true; buttons.Children.Add(ok);
+        buttons.Children.Add(ActionButton("取消", () => dialog.DialogResult = false)); var ok = ActionButton(confirm, () => dialog.DialogResult = true, true); ok.IsDefault = true; buttons.Children.Add(ok);
         dialog.PreviewKeyDown += (_, e) => { if (e.Key == Key.Escape) { dialog.DialogResult = false; e.Handled = true; } };
         dialog.Loaded += (_, _) => { input.Focus(); input.SelectAll(); }; return dialog.ShowDialog() == true ? input.Text : null;
     }
@@ -950,7 +1062,7 @@ public sealed class ControlCenterWindow : Window
         if (_resizeQueued || _disposed || _section is "Settings" or "About") return;
         _resizeQueued = true;
         Dispatcher.BeginInvoke(DispatcherPriority.Background, () =>
-        { _resizeQueued = false; if (IsVisible && _section is not ("Settings" or "About")) RenderAppGrid(_section == "Desktop"); });
+        { _resizeQueued = false; if (IsVisible && _section is not ("Settings" or "About")) RenderAppGrid(false); });
     }
 
     private void OnClosing(object? sender, CancelEventArgs e)

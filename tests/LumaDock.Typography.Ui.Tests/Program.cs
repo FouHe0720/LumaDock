@@ -6,6 +6,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
 using System.Windows.Interop;
+using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Media.Animation;
@@ -13,6 +14,7 @@ using System.Reflection;
 using System.Windows.Threading;
 using LumaDock.App;
 using LumaDock.App.Center;
+using LumaDock.Core;
 using LumaDock.Storage;
 using LumaDock.Windows;
 
@@ -54,6 +56,76 @@ internal static class Program
                 window = new ControlCenterWindow(controller) { ShowActivated = false, ShowInTaskbar = false };
                 window.SourceInitialized += (_, _) => EnableWindow(new WindowInteropHelper(window).Handle, false);
                 window.Show(); await Frame();
+
+                Test("A fresh collection has one unified application page and no automatic columns", () =>
+                {
+                    Require(controller.State.Categories.Count == 0, "Automatic categories returned in a fresh profile.");
+                    var navigation = Descendants<TextBlock>(window).Where(text => Equals(text.Tag, "NavigationLabel")).Select(text => text.Text).ToArray();
+                    Require(navigation.SequenceEqual(new[] { "应用", "偏好设置", "关于" }), "Duplicate desktop or library navigation remains.");
+                    Require(!Descendants<Button>(window).Any(button => Equals(button.Tag, "Dock 已固定")), "A built-in pinned category remains.");
+                    Require(Descendants<TextBlock>(window).Single(text => Equals(text.Tag, "PageHeading")).Text == "应用", "Unified heading is missing.");
+                });
+                var totalBeforeAlias = System.Windows.Automation.AutomationProperties.GetHelpText(Descendants<Button>(window).Single(button => Equals(button.Tag, "全部应用")));
+                var firstPageBeforeAlias = Descendants<Button>(window).Where(button => button.DataContext is AppTileViewModel).Select(button => ((AppTileViewModel)button.DataContext).Entry.Id).ToArray();
+                window.Navigate("Desktop"); await Frame();
+                Test("A legacy desktop entry opens the same complete application list", () =>
+                {
+                    Require(window.CurrentSection == "Launchpad", "A separate desktop view survived navigation.");
+                    Require(System.Windows.Automation.AutomationProperties.GetHelpText(Descendants<Button>(window).Single(button => Equals(button.Tag, "全部应用"))) == totalBeforeAlias, "Legacy navigation changed the total.");
+                    Require(firstPageBeforeAlias.SequenceEqual(Descendants<Button>(window).Where(button => button.DataContext is AppTileViewModel).Select(button => ((AppTileViewModel)button.DataContext).Entry.Id)), "Legacy navigation filtered applications.");
+                });
+                var createColumn = typeof(ControlCenterWindow).GetMethod("TryCreateCategory", BindingFlags.Instance | BindingFlags.NonPublic)!;
+                var renameColumn = typeof(ControlCenterWindow).GetMethod("TryRenameCategory", BindingFlags.Instance | BindingFlags.NonPublic)!;
+                Require((bool)createColumn.Invoke(window, ["随手"])!, "The column creation action rejected a valid name."); await Frame();
+                Test("Creating a column updates actual sidebar, chip, selected page and storage", () =>
+                {
+                    Require(new StateStore(dataPath).Load().Categories.SequenceEqual(new[] { "随手" }), "Created column did not persist.");
+                    Require(Descendants<Button>(window).Any(button => Equals(button.Tag, "CategoryNavigation:随手")), "Column navigation is missing.");
+                    Require(Descendants<Button>(window).Single(button => Equals(button.Tag, "随手")).ContextMenu!.Items.OfType<MenuItem>().Any(item => Equals(item.Header, "删除栏目")), "Created column has no removal action.");
+                    Require(Descendants<TextBlock>(window).Single(text => Equals(text.Tag, "PageHeading")).Text == "随手", "New column was not selected.");
+                });
+                window.Navigate("Launchpad"); await Frame();
+                var groupedEntry = controller.State.Apps.First(entry => !entry.Hidden && entry.IsAvailable);
+                var groupedSourceHash = File.Exists(groupedEntry.LaunchPath) ? FileHash(groupedEntry.LaunchPath) : null;
+                var pinOrder = controller.State.PinnedIds.ToArray();
+                var groupedTile = Descendants<Button>(window).First(button => button.DataContext is AppTileViewModel model && model.Entry.Id == groupedEntry.Id);
+                var putMenu = groupedTile.ContextMenu!.Items.OfType<MenuItem>().Single(item => Equals(item.Header, "放入栏目"));
+                putMenu.Items.OfType<MenuItem>().Single(item => Equals(item.Header, "随手")).RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent)); await Frame();
+                Descendants<Button>(window).Single(button => Equals(button.Tag, "随手")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent)); await Frame();
+                Test("The actual application menu assigns a manual column and its chip filters correctly", () =>
+                {
+                    var saved = new StateStore(dataPath).Load().Apps.Single(entry => entry.Id == groupedEntry.Id);
+                    Require(saved.Category == "随手" && saved.CategoryIsUserAssigned, "Manual assignment did not persist.");
+                    var visible = Descendants<Button>(window).Where(button => button.DataContext is AppTileViewModel).ToArray();
+                    Require(visible.Length == 1 && ((AppTileViewModel)visible[0].DataContext).Entry.Id == groupedEntry.Id, "Column selection is not the assigned application.");
+                });
+                Require((bool)renameColumn.Invoke(window, ["随手", "常用"])!, "The column rename action rejected a valid name."); await Frame();
+                Test("Renaming the selected column updates existing assignments and actual controls", () =>
+                {
+                    Require(groupedEntry.Category == "常用" && new StateStore(dataPath).Load().Categories.SequenceEqual(new[] { "常用" }), "Rename did not persist or update membership.");
+                    Require(Descendants<TextBlock>(window).Single(text => Equals(text.Tag, "PageHeading")).Text == "常用", "Renamed selected column lost its heading.");
+                    Require(Descendants<Button>(window).Any(button => Equals(button.Tag, "CategoryNavigation:常用")), "Renamed sidebar is stale.");
+                });
+                Descendants<Button>(window).Single(button => Equals(button.Tag, "常用")).ContextMenu!.Items.OfType<MenuItem>().Single(item => Equals(item.Header, "删除栏目")).RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent)); await Frame();
+                Test("The actual delete-column menu restores the complete list without changing applications or pins", () =>
+                {
+                    var saved = new StateStore(dataPath).Load();
+                    Require(saved.Categories.Count == 0 && saved.Apps.Single(entry => entry.Id == groupedEntry.Id).Category.Length == 0, "Deleting a column left an assignment behind.");
+                    Require(saved.Apps.Count == controller.State.Apps.Count && pinOrder.SequenceEqual(saved.PinnedIds), "Deleting a column removed an application or changed pins.");
+                    Require(System.Windows.Automation.AutomationProperties.GetHelpText(Descendants<Button>(window).Single(button => Equals(button.Tag, "全部应用"))) == totalBeforeAlias, "Deleting a selected column did not restore all applications.");
+                    Require(Descendants<TextBlock>(window).Single(text => Equals(text.Tag, "PageHeading")).Text == "应用", "Deleting a selected column did not restore the master heading.");
+                    Require(groupedSourceHash == null || FileHash(groupedEntry.LaunchPath).SequenceEqual(groupedSourceHash), "Column organization changed an original application or shortcut.");
+                });
+                Require((bool)createColumn.Invoke(window, ["个人栏目"])!, "An explicit personal column could not be created for typography coverage.");
+                window.Navigate("Launchpad"); await Frame();
+
+                groupedEntry.IsAvailable = false; controller.Save(); await Frame();
+                Test("The unified list omits an unavailable record without erasing its organizing data", () =>
+                {
+                    Require(!Descendants<Button>(window).Any(button => button.DataContext is AppTileViewModel model && model.Entry.Id == groupedEntry.Id), "An unavailable application is still visible.");
+                    Require(controller.State.Apps.Any(entry => entry.Id == groupedEntry.Id) && !groupedEntry.Hidden, "Availability filtering removed or hid the record.");
+                });
+                groupedEntry.IsAvailable = true; controller.Save(); await Frame();
 
                 var defaultSnapshot = Inspect(window, "system-launchpad");
                 Test("Launchpad names use the actual Windows icon-title font by default", () =>
@@ -99,7 +171,8 @@ internal static class Program
                 search.Text = query; await Frame();
                 Test("Category counts follow the actual visible search results", () =>
                 {
-                    var expected = controller.State.Apps.Count(app => !app.Hidden && (app.Name.Contains(query, StringComparison.CurrentCultureIgnoreCase) || app.LaunchPath.Contains(query, StringComparison.OrdinalIgnoreCase)));
+                    var expected = ApplicationPresentation.Group(controller.State.Apps.Where(app => !app.Hidden && app.IsAvailable
+                        && (app.Name.Contains(query, StringComparison.CurrentCultureIgnoreCase) || app.LaunchPath.Contains(query, StringComparison.OrdinalIgnoreCase)))).Count;
                     var all = Descendants<Button>(window).Single(button => Equals(button.Tag, "全部应用"));
                     Require(System.Windows.Automation.AutomationProperties.GetHelpText(all) == $"{expected} 个应用", "Category count does not match the actual search results.");
                     Require(Descendants<TextBlock>(all).Any(text => text.Text == expected.ToString()), "The visible count did not update.");
@@ -246,10 +319,10 @@ internal static class Program
                 });
 
                 window.Navigate("Desktop"); await Frame();
-                var desktopSnapshot = Inspect(window, "manual-40-bold-desktop");
-                Test("Desktop shortcut names receive the same font and adaptive layout", () =>
+                var desktopSnapshot = Inspect(window, "manual-40-bold-unified-legacy-entry");
+                Test("Legacy entry preserves the unified list's font and adaptive layout", () =>
                 {
-                    Require(desktopSnapshot.VisibleTileCount > 0, "No desktop shortcuts were available for this integration check.");
+                    Require(desktopSnapshot.VisibleTileCount > 0 && window.CurrentSection == "Launchpad", "Legacy entry did not use the unified list.");
                     CheckManualFont(window, 40);
                     CheckLabelBounds(window);
                 });
@@ -287,6 +360,23 @@ internal static class Program
                         var point = button.TranslatePoint(new Point(), palette);
                         Require(point.X >= -.5 && point.X + button.ActualWidth <= palette.ActualWidth + .5, "A color control extends beyond its palette.");
                     }
+                });
+                Test("Reflection preference and lower Dock concentration are real persisted controls", () =>
+                {
+                    var reflect = Descendants<CheckBox>(window).Single(check => System.Windows.Automation.AutomationProperties.GetName(check) == "图标倒影");
+                    reflect.IsChecked = false; reflect.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
+                    Require(!new StateStore(dataPath).Load().Settings.IconReflection, "The actual reflection toggle did not save.");
+                    reflect.IsChecked = true; reflect.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
+                    var strength = Descendants<Slider>(window).Single(slider => System.Windows.Automation.AutomationProperties.GetName(slider) == "倒影强度");
+                    strength.Value = .31;
+                    strength.RaiseEvent(new MouseButtonEventArgs(Mouse.PrimaryDevice, Environment.TickCount, MouseButton.Left) { RoutedEvent = UIElement.PreviewMouseLeftButtonUpEvent });
+                    var density = Descendants<Slider>(window).Single(slider => System.Windows.Automation.AutomationProperties.GetName(slider) == "Dock 浓度");
+                    Require(Math.Abs(density.Minimum - .15) < .001, "The transparent range is still restricted to the old minimum.");
+                    density.Value = .25;
+                    density.RaiseEvent(new MouseButtonEventArgs(Mouse.PrimaryDevice, Environment.TickCount, MouseButton.Left) { RoutedEvent = UIElement.PreviewMouseLeftButtonUpEvent });
+                    var saved = new StateStore(dataPath).Load().Settings;
+                    Require(saved.IconReflection && Math.Abs(saved.ReflectionStrength - .31) < .001 && Math.Abs(saved.Opacity - .25) < .001, "Reflection strength or concentration did not persist through actual controls.");
+                    Require(Descendants<TextBlock>(window).Any(text => text.Text == "Windows 桌面图标"), "The original desktop icon recovery control is no longer reachable.");
                 });
                 foreach (var value in new[] { "Rose", "Graphite" })
                 {
@@ -370,6 +460,56 @@ internal static class Program
                 rimType.GetMethod("TrackPointer")!.Invoke(rim, [new Point(320, 110)]);
                 rimType.GetProperty("MotionEnabled")!.SetValue(rim, false);
                 Test("Reduced or disabled glass motion stops immediately", () => Require(!(bool)rimType.GetProperty("IsMotionRunning")!.GetValue(rim)!, "Disabled motion retained an active timer."));
+
+                // Two launch modes of a real local executable remain separate records,
+                // while the UI presents a single app. These fixture modes are never launched.
+                var notepad = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "notepad.exe");
+                Require(File.Exists(notepad), "The local Notepad fixture executable is unavailable.");
+                var sourceHash = FileHash(notepad);
+                var modeA = new AppEntry { Id = "ui-mode-fixture-a", Name = "Mode view fixture", LaunchPath = notepad, ExecutablePath = notepad, Arguments = "/A", WorkingDirectory = Path.GetDirectoryName(notepad)! };
+                var modeB = new AppEntry { Id = "ui-mode-fixture-b", Name = "MODE VIEW FIXTURE", LaunchPath = notepad, ExecutablePath = notepad, Arguments = "/W", WorkingDirectory = Path.GetDirectoryName(notepad)! };
+                var pinsBeforeModes = controller.State.PinnedIds.ToArray();
+                controller.State.Apps.InsertRange(0, [modeA, modeB]); controller.State.PinnedIds.AddRange([modeA.Id, modeB.Id]);
+                controller.Save(); window.Navigate("Launchpad"); await Frame();
+                var modeTiles = Descendants<Button>(window).Where(button => button.DataContext is AppTileViewModel model && new[] { modeA.Id, modeB.Id }.Contains(model.Entry.Id)).ToArray();
+                Test("Alternate executable modes occupy one card without erasing arguments or records", () =>
+                {
+                    Require(modeTiles.Length == 1 && ((AppTileViewModel)modeTiles[0].DataContext).Entry.Id == modeA.Id, "The first ordered representative is not the single visible card.");
+                    var modes = modeTiles[0].ContextMenu!.Items.OfType<MenuItem>().Single(item => Equals(item.Header, "启动方式")).Items.OfType<MenuItem>().ToArray();
+                    Require(modes.Length == 2 && ReferenceEquals(modes[0].Tag, modeA) && ReferenceEquals(modes[1].Tag, modeB), "The launch-mode menu lost its actual variant records.");
+                    Require(((string)modes[0].Header).Contains("/A") && ((string)modes[1].Header).Contains("/W"), "The menu did not distinguish preserved arguments.");
+                    var saved = new StateStore(dataPath).Load();
+                    Require(saved.Apps.Single(entry => entry.Id == modeA.Id).Arguments == "/A" && saved.Apps.Single(entry => entry.Id == modeB.Id).Arguments == "/W", "Presentation grouping destructively merged launch commands.");
+                    var expected = ApplicationPresentation.Group(controller.State.Apps.Where(entry => !entry.Hidden && entry.IsAvailable)).Count;
+                    Require(System.Windows.Automation.AutomationProperties.GetHelpText(Descendants<Button>(window).Single(button => Equals(button.Tag, "全部应用"))) == $"{expected} 个应用", "The master count counts mode records instead of app cards.");
+                });
+                modeTiles[0].ContextMenu!.Items.OfType<MenuItem>().Single(item => Equals(item.Header, "从 Dock 移除")).RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent)); await Frame();
+                Test("A grouped application's unpin action removes all mode pins together", () =>
+                {
+                    Require(pinsBeforeModes.SequenceEqual(controller.State.PinnedIds), "Unpinning a card left a second mode pinned or changed other pins.");
+                });
+                var modeTile = Descendants<Button>(window).Single(button => button.DataContext is AppTileViewModel model && model.Entry.Id == modeA.Id);
+                modeTile.ContextMenu!.Items.OfType<MenuItem>().Single(item => Equals(item.Header, "放入栏目")).Items.OfType<MenuItem>().Single(item => Equals(item.Header, "个人栏目")).RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent)); await Frame();
+                Descendants<Button>(window).Single(button => Equals(button.Tag, "个人栏目")).RaiseEvent(new RoutedEventArgs(Button.ClickEvent)); await Frame();
+                Test("Manual column placement keeps all modes together and counts one app", () =>
+                {
+                    Require(modeA.Category == "个人栏目" && modeB.Category == "个人栏目", "Only one mode moved into the manual column.");
+                    Require(Descendants<Button>(window).Count(button => button.DataContext is AppTileViewModel) == 1, "The column shows duplicate mode cards.");
+                    Require(System.Windows.Automation.AutomationProperties.GetHelpText(Descendants<Button>(window).Single(button => Equals(button.Tag, "个人栏目"))) == "1 个应用", "The column counts mode records instead of apps.");
+                });
+                typeof(ControlCenterWindow).GetMethod("RemoveApplication", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(window, [modeA]); await Frame();
+                Test("Hiding one app card hides all of its modes and keeps source files and records", () =>
+                {
+                    Require(modeA.Hidden && modeB.Hidden, "A hidden app can return through another mode record.");
+                    Require(controller.State.Apps.Contains(modeA) && controller.State.Apps.Contains(modeB) && FileHash(notepad).SequenceEqual(sourceHash), "Hiding a mode card removed a record or changed an executable.");
+                });
+                Test("Presentation grouping keeps shared hosts and different executables separate", () =>
+                {
+                    var host = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "explorer.exe");
+                    Require(ApplicationPresentation.Group([new AppEntry { Name = "Host fixture", ExecutablePath = host, Arguments = "one" }, new AppEntry { Name = "Host fixture", ExecutablePath = host, Arguments = "two" }]).Count == 2, "A shared Shell host collapsed unrelated actions.");
+                    Require(ApplicationPresentation.Group([modeA, new AppEntry { Name = modeA.Name, ExecutablePath = host }]).Count == 2, "Matching names collapsed different executables.");
+                });
+                controller.State.Apps.RemoveAll(entry => entry.Id == modeA.Id || entry.Id == modeB.Id); controller.Save(); window.Navigate("Launchpad"); await Frame();
                 Test("WPF completed all typography transitions without a dispatcher exception", () => Require(Errors.Count == 0, "Dispatcher errors were observed."));
                 exitCode = Tests.All(t => t.Passed) && Errors.Count == 0 ? 0 : 1;
             }
@@ -386,7 +526,7 @@ internal static class Program
                     systemSettingsChanged = false, systemFontChanged = false, appLaunches = 0,
                     controllerStartCalled = false, nativeWindowsDisabledExceptOwnCaretContract = true,
                     nativeCaretChecks = NativeCaretChecks,
-                    interpretation = "Checks actual WPF labels, local preferences, native caret/root-clock lifecycle, category counts and bounded motion using isolated data. Editing is programmatic; external IME composition is not tested. Font-change delivery uses local service injection. Windows typography and caret blink settings are not modified."
+                    interpretation = "Checks actual WPF labels, local preferences, unified navigation, column controls/menus and persistence, native caret/root-clock lifecycle, counts and bounded motion using isolated data. Creation/rename values use the same actions called by their dialogs; text entry is programmatic. External IME composition is not tested. Font-change delivery uses local service injection. Windows typography and caret blink settings are not modified."
                 };
                 Directory.CreateDirectory(Path.GetDirectoryName(reportPath)!);
                 File.WriteAllText(reportPath, JsonSerializer.Serialize(report, new JsonSerializerOptions { WriteIndented = true }));
@@ -425,10 +565,10 @@ internal static class Program
     private static void CheckInterfaceFont(ControlCenterWindow window, DesktopFontInfo font)
     {
         var navigation = Descendants<TextBlock>(window).Where(text => Equals(text.Tag, "NavigationLabel")).ToArray();
-        Require(navigation.Length == 4, "The four navigation labels were not rendered.");
+        Require(navigation.Length >= 3 && navigation.Count(label => label.Text == "应用") == 1, "The unified navigation labels were not rendered.");
         foreach (var label in navigation)
         {
-            var expected = label.Text == "应用库" ? Math.Max(600, font.Weight) : font.Weight;
+            var expected = Equals(Ancestor<Button>(label)?.Tag, "Navigation:Launchpad") ? Math.Max(600, font.Weight) : font.Weight;
             Require(label.FontWeight.ToOpenTypeWeight() == expected, "Navigation ignored the active font weight.");
             Require(label.FontFamily.Source == font.FamilyName, "Navigation ignored the active font family.");
             Require(label.FontSize <= 15 && label.ActualWidth < 110, "Name font size expanded or clipped the navigation.");
@@ -437,14 +577,14 @@ internal static class Program
         Require(heading.FontWeight.ToOpenTypeWeight() == Math.Max(600, font.Weight), "Page heading ignored font weight.");
         var all = Descendants<Button>(window).Single(button => Equals(button.Tag, "全部应用"));
         Require(Descendants<TextBlock>(all).First().FontWeight.ToOpenTypeWeight() == Math.Max(600, font.Weight), "Selected category ignored font weight.");
-        var unselected = Descendants<Button>(window).Single(button => Equals(button.Tag, "Dock 已固定"));
+        var unselected = Descendants<Button>(window).Single(button => Equals(button.Tag, "个人栏目"));
         Require(Descendants<TextBlock>(unselected).First().FontWeight.ToOpenTypeWeight() == font.Weight, "Category label ignored the active font weight.");
     }
 
     private static void CheckPrimaryTextColor(ControlCenterWindow window, Color expected)
     {
         var primary = Descendants<TextBlock>(window).Where(text => Equals(text.Tag, "NavigationLabel") || Equals(text.Tag, "PageHeading") || Equals(text.Tag, "ApplicationName"))
-            .Concat(Descendants<Button>(window).Where(button => Equals(button.Tag, "全部应用") || Equals(button.Tag, "Dock 已固定")).Select(button => Descendants<TextBlock>(button).First())).ToArray();
+            .Concat(Descendants<Button>(window).Where(button => Equals(button.Tag, "全部应用") || Equals(button.Tag, "个人栏目")).Select(button => Descendants<TextBlock>(button).First())).ToArray();
         Require(primary.Length >= 8, "Primary labels are missing from the actual visual tree.");
         Require(primary.All(text => text.Foreground is SolidColorBrush brush && brush.Color == expected), "A primary interface label ignored custom text color.");
     }

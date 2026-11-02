@@ -9,19 +9,24 @@ public sealed class AppEntry
     public string WorkingDirectory { get; set; } = "";
     public string ExecutablePath { get; set; } = "";
     public string AppUserModelId { get; set; } = "";
+    public string LaunchUri { get; set; } = "";
     public string CustomIconPath { get; set; } = "";
-    public string Category { get; set; } = "其他";
+    public string Category { get; set; } = "";
     public bool CategoryIsUserAssigned { get; set; }
     public int CategoryRuleVersion { get; set; }
     public string Source { get; set; } = "Manual";
     public List<string> DesktopPaths { get; set; } = [];
     public bool Hidden { get; set; }
+    public bool IsAvailable { get; set; } = true;
 }
 
 public sealed class DockSettings
 {
     public string Theme { get; set; } = "System";
-    public double Opacity { get; set; } = .88;
+    public double Opacity { get; set; } = .70;
+    public int DockMaterialVersion { get; set; }
+    public bool IconReflection { get; set; } = true;
+    public double ReflectionStrength { get; set; } = .24;
     public bool LiquidGlass { get; set; } = true;
     public bool LiveGlass { get; set; } = true;
     public string LiveGlassStyle { get; set; } = "Clear";
@@ -53,9 +58,10 @@ public sealed class DockSettings
 
 public sealed class AppState
 {
-    public int SchemaVersion { get; set; } = 1;
+    public int SchemaVersion { get; set; } = 2;
+    public int OrganizationVersion { get; set; }
     public List<AppEntry> Apps { get; set; } = [];
     public List<string> PinnedIds { get; set; } = [];
-    public List<string> Categories { get; set; } = ["开发工具", "办公学习", "浏览器", "影音娱乐", "系统工具", "游戏", "其他"];
+    public List<string> Categories { get; set; } = [];
     public DockSettings Settings { get; set; } = new();
 }

@@ -1,13 +1,19 @@
 {
-  "SchemaVersion": 1,
+  "SchemaVersion": 2,
+  "OrganizationVersion": 1,
   "Apps": [],
   "PinnedIds": [],
-  "Categories": ["开发工具", "办公学习", "浏览器", "影音娱乐", "系统工具", "游戏", "其他"],
+  "Categories": [],
   "Settings": {
     "Theme": "System",
-    "Opacity": 0.88,
+    "Opacity": 0.70,
+    "DockMaterialVersion": 1,
+    "IconReflection": true,
+    "ReflectionStrength": 0.24,
     "LiquidGlass": true,
     "LiveGlass": true,
+    "LiveGlassStyle": "Clear",
+    "BackdropOpacity": 0.65,
     "GlassClarity": 0.65,
     "GlassMotion": true,
     "GlassFlowStrength": 0.45,
@@ -15,6 +21,7 @@
     "CornerRadius": 24,
     "IconSize": 48,
     "Spacing": 10,
+    "DockShape": "Capsule",
     "Position": "Bottom",
     "AutoHide": false,
     "AnimationStrength": 0.45,
@@ -27,6 +34,7 @@
     "NameFontBold": false,
     "NameFontFamily": "",
     "NameFontItalic": false,
+    "TextColor": "",
     "StartWithWindows": false,
     "CloseToTray": true
   }

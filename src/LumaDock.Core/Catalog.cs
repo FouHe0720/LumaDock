@@ -6,18 +6,48 @@ namespace LumaDock.Core;
 public static class Catalog
 {
     public const int CategoryRuleVersion = 1;
+    public const int OrganizationVersion = 1;
+    private static readonly string[] BuiltInCategories = ["开发工具", "办公学习", "浏览器", "影音娱乐", "系统工具", "游戏", "其他", "创作设计", "社交通讯", "应用库", "桌面集"];
     public static string StableId(string source) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(source.ToUpperInvariant())))[..24];
 
     public static string SuggestCategory(string name) => AppCategories.Suggest(name);
     public static string SuggestCategory(AppEntry app) => AppCategories.Suggest(app.Name, app.ExecutablePath);
     public static void AssignCategory(AppEntry app, string category)
-    { app.Category = category; app.CategoryIsUserAssigned = true; app.CategoryRuleVersion = CategoryRuleVersion; }
+    { app.Category = category.Trim(); app.CategoryIsUserAssigned = app.Category.Length > 0; app.CategoryRuleVersion = CategoryRuleVersion; }
+    public static bool CreateCategory(AppState state, string name)
+    {
+        MigrateOrganization(state);
+        name = CategoryName(name);
+        if (name.Length == 0 || state.Categories.Contains(name, StringComparer.OrdinalIgnoreCase)) return false;
+        state.Categories.Add(name); return true;
+    }
+    public static bool RenameCategory(AppState state, string oldName, string newName)
+    {
+        newName = CategoryName(newName);
+        var index = state.Categories.IndexOf(oldName);
+        if (index < 0 || newName.Length == 0 || state.Categories.Where((_, i) => i != index).Contains(newName, StringComparer.OrdinalIgnoreCase)) return false;
+        state.Categories[index] = newName;
+        foreach (var app in state.Apps.Where(a => a.Category == oldName)) AssignCategory(app, newName);
+        return true;
+    }
+    public static bool DeleteCategory(AppState state, string name)
+    {
+        if (!state.Categories.Remove(name)) return false;
+        foreach (var app in state.Apps.Where(a => a.Category == name)) AssignCategory(app, "");
+        return true;
+    }
+    private static string CategoryName(string? name)
+    {
+        name = (name ?? "").Trim();
+        return name.Length is > 0 and <= 40 && !name.Any(char.IsControl)
+            && !new[] { "全部应用", "全部", "Dock 已固定", "已固定", "应用库", "桌面集" }.Contains(name, StringComparer.OrdinalIgnoreCase) ? name : "";
+    }
     public static AppEntry? FindEquivalent(AppState state, AppEntry app) => state.Apps.FirstOrDefault(existing => AppIdentity.AreEquivalent(existing, app));
 
     // Discovery updates launch metadata, while retaining user classification, order and tombstones.
     public static void Merge(AppState state, IEnumerable<AppEntry> discovered)
     {
-        foreach (var app in state.Apps) UpdateAutomaticCategory(app);
+        MigrateOrganization(state);
         var known = state.Apps.ToDictionary(a => a.Id, StringComparer.OrdinalIgnoreCase);
         foreach (var app in discovered)
         {
@@ -25,17 +55,16 @@ public static class Catalog
             existing ??= FindEquivalent(state, app);
             if (existing != null)
             {
-                MergeMetadata(existing, app, exact || LaunchRank(app) < LaunchRank(existing));
-                if (!existing.CategoryIsUserAssigned) existing.Category = SuggestCategory(existing);
+                MergeMetadata(existing, app, exact || !existing.IsAvailable && app.IsAvailable || LaunchRank(app) < LaunchRank(existing));
             }
             else
             {
-                app.Category = SuggestCategory(app); app.CategoryRuleVersion = CategoryRuleVersion;
+                app.Category = ""; app.CategoryIsUserAssigned = false; app.CategoryRuleVersion = CategoryRuleVersion;
                 state.Apps.Add(app); known[app.Id] = app;
             }
         }
         Deduplicate(state);
-        foreach (var category in state.Apps.Select(app => app.Category).Distinct()) if (!state.Categories.Contains(category)) state.Categories.Add(category);
+        KeepManualGroups(state);
     }
 
     // Canonical IDs and the first user order survive an upgrade. Duplicate pins map to that same ID.
@@ -61,7 +90,7 @@ public static class Catalog
             else
             {
                 redirects[app.Id] = existing.Id;
-                MergeMetadata(existing, app, LaunchRank(app) < LaunchRank(existing));
+                MergeMetadata(existing, app, !existing.IsAvailable && app.IsAvailable || LaunchRank(app) < LaunchRank(existing));
                 if (!existing.CategoryIsUserAssigned && app.CategoryIsUserAssigned)
                 { existing.Category = app.Category; existing.CategoryIsUserAssigned = true; existing.CategoryRuleVersion = app.CategoryRuleVersion; }
                 existing.Hidden |= app.Hidden;
@@ -85,53 +114,80 @@ public static class Catalog
             existing.Name = incoming.Name; existing.LaunchPath = incoming.LaunchPath;
             existing.Arguments = incoming.Arguments; existing.WorkingDirectory = incoming.WorkingDirectory;
             existing.ExecutablePath = incoming.ExecutablePath; existing.Source = incoming.Source;
+            existing.LaunchUri = incoming.LaunchUri;
         }
         if (replaceLaunch || string.IsNullOrWhiteSpace(existing.AppUserModelId)) existing.AppUserModelId = aumid;
         existing.DesktopPaths = (existing.DesktopPaths ?? []).Concat(incoming.DesktopPaths ?? []).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
         if (string.IsNullOrEmpty(existing.CustomIconPath)) existing.CustomIconPath = incoming.CustomIconPath;
+        if (string.IsNullOrEmpty(existing.LaunchUri)) existing.LaunchUri = incoming.LaunchUri;
+        existing.IsAvailable |= incoming.IsAvailable;
     }
 
     private static int LaunchRank(AppEntry app) => app.Source switch { "StartMenu" => 0, "Desktop" => 1, "Manual" => 2, "AppsFolder" => 4, _ => 3 };
 
-    private static void UpdateAutomaticCategory(AppEntry app)
+    private static void MigrateOrganization(AppState state)
     {
-        if (app.CategoryRuleVersion == 0 && !app.CategoryIsUserAssigned)
-            app.CategoryIsUserAssigned = !AppCategories.WasAutomatic(app.Category ?? "", app.Name ?? "");
-        if (!app.CategoryIsUserAssigned && app.CategoryRuleVersion < CategoryRuleVersion) app.Category = SuggestCategory(app);
-        app.CategoryRuleVersion = CategoryRuleVersion;
+        if (state.OrganizationVersion >= OrganizationVersion) return;
+        // Remove the old built-in columns once, including old manual assignments
+        // into those columns. Truly custom groups stay; scanning never classifies.
+        var custom = state.Categories.Where(c => !BuiltInCategories.Contains(c, StringComparer.Ordinal)).ToList();
+        foreach (var app in state.Apps)
+        {
+            var legacyCustom = app.CategoryRuleVersion == 0 && !string.IsNullOrWhiteSpace(app.Category)
+                && !BuiltInCategories.Contains(app.Category, StringComparer.Ordinal);
+            if (BuiltInCategories.Contains(app.Category, StringComparer.Ordinal) || !app.CategoryIsUserAssigned && !legacyCustom) app.Category = "";
+            app.CategoryIsUserAssigned = !string.IsNullOrWhiteSpace(app.Category);
+            app.CategoryRuleVersion = CategoryRuleVersion;
+            if (app.CategoryIsUserAssigned && !custom.Contains(app.Category)) custom.Add(app.Category);
+        }
+        state.Categories = custom; state.OrganizationVersion = OrganizationVersion;
+    }
+    private static void KeepManualGroups(AppState state)
+    {
+        foreach (var app in state.Apps)
+        {
+            app.Category = CategoryName(app.Category);
+            if (app.Category.Length == 0) { app.CategoryIsUserAssigned = false; continue; }
+            if (!app.CategoryIsUserAssigned) { app.Category = ""; continue; }
+            var existing = state.Categories.FirstOrDefault(category => string.Equals(category, app.Category, StringComparison.OrdinalIgnoreCase));
+            if (existing == null) state.Categories.Add(app.Category); else app.Category = existing;
+        }
     }
 
     public static IEnumerable<AppEntry> Search(AppState state, string query, string? category = null)
     {
         var terms = query.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries);
-        return state.Apps.Where(a => !a.Hidden && (string.IsNullOrEmpty(category) || a.Category == category)
+        return state.Apps.Where(a => !a.Hidden && a.IsAvailable && (string.IsNullOrEmpty(category) || a.Category == category)
             && terms.All(t => a.Name.Contains(t, StringComparison.CurrentCultureIgnoreCase) || a.Category.Contains(t, StringComparison.CurrentCultureIgnoreCase)));
     }
 
     public static void Normalize(AppState state)
     {
-        if (state.SchemaVersion != 1) throw new InvalidDataException($"不支持的配置版本 {state.SchemaVersion}，请使用对应版本的 LumaDock。");
+        if (state.SchemaVersion is not (1 or 2)) throw new InvalidDataException($"不支持的配置版本 {state.SchemaVersion}，请使用对应版本的 LumaDock。");
+        state.SchemaVersion = 2;
         state.Settings ??= new(); state.Apps ??= []; state.Categories ??= []; state.PinnedIds ??= [];
         state.Apps = state.Apps.Where(a => a != null && !string.IsNullOrWhiteSpace(a.Id) && !string.IsNullOrWhiteSpace(a.LaunchPath)).DistinctBy(a => a.Id, StringComparer.OrdinalIgnoreCase).ToList();
-        state.Categories = state.Categories.Where(c => !string.IsNullOrWhiteSpace(c)).Distinct().ToList();
+        state.Categories = state.Categories.Select(CategoryName).Where(c => c.Length > 0).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        MigrateOrganization(state);
         foreach (var app in state.Apps)
         {
             app.Name ??= Path.GetFileNameWithoutExtension(app.LaunchPath); app.Arguments ??= "";
             app.WorkingDirectory ??= ""; app.ExecutablePath ??= ""; app.AppUserModelId ??= ""; app.Source ??= "Manual";
+            app.LaunchUri = AppIdentity.NormalizeLaunchUri(app.LaunchUri);
             app.DesktopPaths ??= [];
             app.CustomIconPath = NormalizeIconPath(app.CustomIconPath);
-            if (string.IsNullOrWhiteSpace(app.Category)) app.Category = "其他";
-            UpdateAutomaticCategory(app);
         }
         Deduplicate(state);
-        foreach (var app in state.Apps) if (!state.Categories.Contains(app.Category)) state.Categories.Add(app.Category);
-        if (!state.Categories.Contains("其他")) state.Categories.Add("其他");
+        KeepManualGroups(state);
         var ids = state.Apps.Where(a => !a.Hidden).Select(a => a.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
         state.PinnedIds = state.PinnedIds.Where(ids.Contains).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
         var s = state.Settings;
         if (!new[] { "Clear", "Frosted" }.Contains(s.LiveGlassStyle)) s.LiveGlassStyle = "Clear";
         s.BackdropOpacity = double.IsFinite(s.BackdropOpacity) ? Math.Clamp(s.BackdropOpacity, .25, .9) : .65;
-        s.Opacity = double.IsFinite(s.Opacity) ? Math.Clamp(s.Opacity, .55, 1) : .88;
+        if (s.DockMaterialVersion == 0 && Math.Abs(s.Opacity - .88) < .000001) s.Opacity = .70;
+        s.DockMaterialVersion = 1;
+        s.Opacity = double.IsFinite(s.Opacity) ? Math.Clamp(s.Opacity, .15, 1) : .70;
+        s.ReflectionStrength = double.IsFinite(s.ReflectionStrength) ? Math.Clamp(s.ReflectionStrength, 0, .5) : .24;
         s.GlassClarity = double.IsFinite(s.GlassClarity) ? Math.Clamp(s.GlassClarity, .1, 1) : .65;
         s.GlassFlowStrength = double.IsFinite(s.GlassFlowStrength) ? Math.Clamp(s.GlassFlowStrength, 0, 1) : .45;
         if (!new[] { "Lagoon", "Jade", "Amber", "Iris", "Rose", "Graphite" }.Contains(s.Accent)) s.Accent = "Lagoon";

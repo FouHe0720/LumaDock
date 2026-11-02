@@ -17,6 +17,7 @@ internal static class Program
         var observations = new Dictionary<string, object>();
         var total = Stopwatch.StartNew();
         List<AppEntry> apps = [];
+        AppDiscoverySnapshot? snapshot = null;
         void Check(string name, Action action)
         {
             var clock = Stopwatch.StartNew();
@@ -35,14 +36,20 @@ internal static class Program
 
         Check("Shell discovery returns real named launch records with unique stable identities", () =>
         {
-            apps = AppDiscovery.Scan();
+            snapshot = AppDiscovery.ScanSnapshot(); apps = snapshot.Entries.ToList();
             Require(apps.Count > 0);
             Require(apps.All(a => !string.IsNullOrWhiteSpace(a.Id) && !string.IsNullOrWhiteSpace(a.Name) && !string.IsNullOrWhiteSpace(a.LaunchPath)));
             Require(apps.Select(a => a.Id).Distinct(StringComparer.OrdinalIgnoreCase).Count() == apps.Count);
             Require(apps.All(a => a.LaunchPath.StartsWith("shell:AppsFolder\\", StringComparison.OrdinalIgnoreCase) || File.Exists(a.LaunchPath)));
+            Require(apps.All(a => a.Category.Length == 0 && a.IsAvailable && ApplicationAvailability.Evaluate(a, snapshot) != false));
+            for (var first = 0; first < apps.Count; first++)
+                for (var second = first + 1; second < apps.Count; second++) Require(!AppIdentity.AreEquivalent(apps[first], apps[second]));
             observations["applicationCount"] = apps.Count;
             observations["appsFolderIdentityCount"] = apps.Count(a => !string.IsNullOrEmpty(a.AppUserModelId));
             observations["fileShortcutCount"] = apps.Count(a => a.LaunchPath.EndsWith(".lnk", StringComparison.OrdinalIgnoreCase));
+            observations["appsFolderComplete"] = snapshot.AppsFolderComplete;
+            observations["excludedUnavailableCount"] = snapshot.ExcludedUnavailableCount;
+            observations["excludedNonApplicationCount"] = snapshot.ExcludedNonApplicationCount;
         });
 
         Check("Desktop discovery accepts empty desktops and returns existing shortcut or program files", () =>
@@ -51,7 +58,7 @@ internal static class Program
             var roots = new[] { Environment.SpecialFolder.DesktopDirectory, Environment.SpecialFolder.CommonDesktopDirectory }
                 .Select(Environment.GetFolderPath).Where(p => !string.IsNullOrWhiteSpace(p)).Select(p => Path.GetFullPath(p).TrimEnd('\\') + "\\").ToList();
             Require(desktop.All(a => a.Source == "Desktop" && File.Exists(a.LaunchPath) && roots.Any(root => a.LaunchPath.StartsWith(root, StringComparison.OrdinalIgnoreCase))));
-            Require(desktop.All(a => new[] { ".lnk", ".url", ".exe" }.Contains(Path.GetExtension(a.LaunchPath), StringComparer.OrdinalIgnoreCase)));
+            Require(desktop.All(a => new[] { ".lnk", ".url", ".exe", ".appref-ms" }.Contains(Path.GetExtension(a.LaunchPath), StringComparer.OrdinalIgnoreCase)));
             observations["desktopRecordCount"] = desktop.Count;
         });
 
@@ -60,6 +67,75 @@ internal static class Program
         var transferExecutable = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "explorer.exe");
         var transferApp = new AppEntry { Name = "Transfer fixture", LaunchPath = transferExecutable, ExecutablePath = transferExecutable,
             Arguments = "--fixture \"profile with spaces\"", WorkingDirectory = transferFixture };
+        Check("Internet shortcut URI identities backfill old records and merge aliases without changing files", () =>
+        {
+            var firstFile = Path.Combine(transferFixture, "first-game.url"); var secondFile = Path.Combine(transferFixture, "second-game.url");
+            var contents = "[InternetShortcut]\r\nURL=steam://rungameid/123456789\r\n";
+            File.WriteAllText(firstFile, contents); File.WriteAllText(secondFile, contents);
+            var first = AppDiscovery.FromPath(firstFile); var second = AppDiscovery.FromPath(secondFile);
+            Require(first.LaunchUri == "steam://rungameid/123456789" && second.LaunchUri == first.LaunchUri);
+            first.LaunchUri = second.LaunchUri = "";
+            var state = new AppState { Apps = [first, second], PinnedIds = [second.Id, first.Id] };
+            var fresh = AppDiscovery.FromPath(firstFile);
+            AppDiscovery.MergeSnapshot(state, new([fresh], new HashSet<string>(StringComparer.OrdinalIgnoreCase), true));
+            Require(state.Apps.Count == 1 && state.PinnedIds.SequenceEqual([first.Id]) && state.Apps[0].LaunchUri.Length > 0);
+            Require(File.ReadAllText(firstFile) == contents && File.ReadAllText(secondFile) == contents);
+        });
+        Check("Partial Shell discovery never declares an unobserved namespace application missing", () =>
+        {
+            var entry = new AppEntry { Id = "namespace", LaunchPath = "shell:AppsFolder\\Fixture.Package!App", AppUserModelId = "Fixture.Package!App" };
+            var state = new AppState { Apps = [entry], PinnedIds = [entry.Id] };
+            var partial = new AppDiscoverySnapshot([], new HashSet<string>(StringComparer.OrdinalIgnoreCase), false);
+            AppDiscovery.MergeSnapshot(state, partial);
+            Require(entry.IsAvailable && state.PinnedIds.SequenceEqual([entry.Id]));
+            var complete = partial with { AppsFolderComplete = true };
+            AppDiscovery.MergeSnapshot(state, complete);
+            Require(!entry.IsAvailable && state.Apps.Count == 1 && state.PinnedIds.SequenceEqual([entry.Id]));
+            var returned = new AppEntry { Id = entry.Id, LaunchPath = entry.LaunchPath, AppUserModelId = entry.AppUserModelId, Source = "AppsFolder" };
+            AppDiscovery.MergeSnapshot(state, new([returned], new HashSet<string>(StringComparer.OrdinalIgnoreCase) { entry.AppUserModelId }, true));
+            Require(entry.IsAvailable && state.Apps.Count == 1 && state.PinnedIds.SequenceEqual([entry.Id]));
+        });
+        Check("Live packaged registration outranks a protected or obsolete executable path", () =>
+        {
+            var entry = new AppEntry { LaunchPath = "shell:AppsFolder\\Fixture.Package!App", AppUserModelId = "Fixture.Package!App", ExecutablePath = Path.Combine(transferFixture, "not-accessible.exe") };
+            Require(ApplicationAvailability.Evaluate(entry, new([], new HashSet<string>(StringComparer.OrdinalIgnoreCase), false)) == null);
+            Require(ApplicationAvailability.Evaluate(entry, new([], new HashSet<string>(StringComparer.OrdinalIgnoreCase) { entry.AppUserModelId }, true)) == true);
+            Require(ApplicationAvailability.Evaluate(entry, new([], new HashSet<string>(StringComparer.OrdinalIgnoreCase), true)) == false);
+        });
+        Check("Unregistered Shell actions stay unavailable even when old executable files remain", () =>
+        {
+            var entry = new AppEntry { LaunchPath = "shell:AppsFolder\\Fixture.Removed!App", AppUserModelId = "Fixture.Removed!App", ExecutablePath = transferExecutable };
+            Require(ApplicationAvailability.Evaluate(entry, new([], new HashSet<string>(StringComparer.OrdinalIgnoreCase), true)) == false);
+            entry.LaunchPath = transferExecutable;
+            Require(ApplicationAvailability.Evaluate(entry, new([], new HashSet<string>(StringComparer.OrdinalIgnoreCase), true)) == true);
+        });
+        Check("Missing local applications disappear softly and return without losing user data", () =>
+        {
+            var target = Path.Combine(transferFixture, "availability-fixture.exe"); File.Copy(transferExecutable, target);
+            var entry = new AppEntry { Id = "local", Name = "Local fixture", LaunchPath = target, ExecutablePath = target, CustomIconPath = target, Category = "保留栏目", CategoryIsUserAssigned = true };
+            var state = new AppState { Apps = [entry], PinnedIds = [entry.Id] };
+            var evidence = new AppDiscoverySnapshot([], new HashSet<string>(StringComparer.OrdinalIgnoreCase), true);
+            AppDiscovery.MergeSnapshot(state, evidence); Require(entry.IsAvailable);
+            File.Delete(target); AppDiscovery.MergeSnapshot(state, evidence);
+            Require(!entry.IsAvailable && state.Apps.Count == 1 && state.PinnedIds.SequenceEqual([entry.Id]) && entry.CustomIconPath == target && entry.Category == "保留栏目");
+            File.Copy(transferExecutable, target); AppDiscovery.MergeSnapshot(state, evidence); Require(entry.IsAvailable);
+        });
+        Check("A missing shortcut can use its still-present executable with its arguments and working directory", () =>
+        {
+            var entry = new AppEntry { Id = "shortcut", LaunchPath = Path.Combine(transferFixture, "removed-shortcut.lnk"), ExecutablePath = transferExecutable, Arguments = "--fixture", WorkingDirectory = transferFixture };
+            var state = new AppState { Apps = [entry], PinnedIds = [entry.Id] };
+            AppDiscovery.MergeSnapshot(state, new([], new HashSet<string>(StringComparer.OrdinalIgnoreCase), true));
+            Require(entry.IsAvailable && entry.LaunchPath == transferExecutable && entry.Arguments == "--fixture" && entry.WorkingDirectory == transferFixture && state.PinnedIds.SequenceEqual([entry.Id]));
+        });
+        Check("Document and folder shortcuts are excluded without modifying their original files", () =>
+        {
+            var document = Path.Combine(transferFixture, "document.txt"); File.WriteAllText(document, "fixture contents");
+            var link = DesktopShortcutService.WriteShortcut(new AppEntry { Name = "Document fixture", LaunchPath = document }, transferFixture);
+            var before = SHA256.HashData(File.ReadAllBytes(link)); var rejected = false;
+            try { AppDiscovery.FromPath(link); } catch (InvalidDataException) { rejected = true; }
+            Require(rejected && before.SequenceEqual(SHA256.HashData(File.ReadAllBytes(link))) && File.ReadAllText(document) == "fixture contents");
+            Require(!ApplicationAvailability.IsApplicationEntry(new AppEntry { LaunchPath = link, ExecutablePath = transferFixture }));
+        });
         string originalTransfer = "";
         Check("New desktop shortcut preserves executable arguments and working directory", () =>
         {

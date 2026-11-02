@@ -104,13 +104,13 @@ public sealed class AppController : IDisposable
         var sw = Stopwatch.StartNew();
         try
         {
-            var found = await RunStaAsync(AppDiscovery.Scan);
+            var snapshot = await RunStaAsync(AppDiscovery.ScanSnapshot);
             if (disposed) return;
-            var first = State.Apps.Count == 0;
-            Catalog.Merge(State, found);
-            if (first) State.PinnedIds = State.Apps.Where(a => !a.Hidden).OrderBy(a => a.Category == "浏览器" ? 0 : a.Category == "开发工具" ? 1 : 2).Take(6).Select(a => a.Id).ToList();
-            Save(); metrics["scanMs"] = sw.Elapsed.TotalMilliseconds; metrics["appCount"] = State.Apps.Count; WriteMetrics();
-            Log.Write($"Scan completed: {found.Count} discovered, {sw.ElapsedMilliseconds}ms");
+            AppDiscovery.MergeSnapshot(State, snapshot);
+            Save(); metrics["scanMs"] = sw.Elapsed.TotalMilliseconds; metrics["appCount"] = State.Apps.Count(a => a.IsAvailable && !a.Hidden);
+            metrics["unavailableCount"] = State.Apps.Count(a => !a.IsAvailable);
+            metrics["shellInventoryComplete"] = snapshot.AppsFolderComplete; WriteMetrics();
+            Log.Write($"Scan completed: {snapshot.Entries.Count} discovered, {sw.ElapsedMilliseconds}ms; Shell complete: {snapshot.AppsFolderComplete}");
         }
         catch (Exception e) { Log.Write("Scan failed", e); Notify("应用扫描失败：" + e.Message); }
         finally { refreshing = false; }
@@ -130,9 +130,30 @@ public sealed class AppController : IDisposable
         try { store.Save(State); Changed?.Invoke(this, EventArgs.Empty); if (rebuildDock) dock?.Rebuild(); }
         catch (Exception ex) { Log.Write("Save failed", ex); Notify("配置保存失败：" + ex.Message); }
     }
-    public void Pin(AppEntry app) { app.Hidden = false; if (!State.PinnedIds.Contains(app.Id)) State.PinnedIds.Add(app.Id); Save(); }
-    public void PinAt(AppEntry app, int gap) { app.Hidden = false; DockOrder.InsertAtGap(State.PinnedIds, [app.Id], gap); Save(); }
-    public void Unpin(AppEntry app) { State.PinnedIds.Remove(app.Id); Save(); }
+    private IReadOnlyList<AppEntry> ApplicationEntries(AppEntry app) => ApplicationPresentation.Group(State.Apps)
+        .FirstOrDefault(group => group.Entries.Any(entry => entry.Id == app.Id))?.Entries ?? [app];
+    public void Pin(AppEntry app)
+    {
+        var entries = ApplicationEntries(app); foreach (var entry in entries) entry.Hidden = false;
+        var ids = entries.Select(entry => entry.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (!State.PinnedIds.Any(ids.Contains)) State.PinnedIds.Add(app.Id);
+        Save();
+    }
+    private string PrepareApplicationPin(AppEntry app, ref int gap)
+    {
+        var entries = ApplicationEntries(app); foreach (var entry in entries) entry.Hidden = false;
+        var ids = entries.Select(entry => entry.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var selected = State.PinnedIds.FirstOrDefault(ids.Contains) ?? app.Id;
+        // Retain the originally pinned launch mode, while moving a logical app only once.
+        for (var index = State.PinnedIds.Count - 1; index >= 0; index--)
+            if (ids.Contains(State.PinnedIds[index]) && State.PinnedIds[index] != selected)
+            { State.PinnedIds.RemoveAt(index); if (index < gap) gap--; }
+        return selected;
+    }
+    public void PinAt(AppEntry app, int gap)
+    { var selected = PrepareApplicationPin(app, ref gap); DockOrder.InsertAtGap(State.PinnedIds, [selected], gap); Save(); }
+    public void Unpin(AppEntry app)
+    { var ids = ApplicationEntries(app).Select(entry => entry.Id).ToHashSet(StringComparer.OrdinalIgnoreCase); State.PinnedIds.RemoveAll(ids.Contains); Save(); }
     public void SetCustomIcon(AppEntry app, string? path)
     {
         var normalized = Catalog.NormalizeIconPath(path);
@@ -177,8 +198,9 @@ public sealed class AppController : IDisposable
         if (disposed) return;
         Catalog.Merge(State, result.found);
         var apps = result.found.Select(found => Catalog.FindEquivalent(State, found)).OfType<AppEntry>().DistinctBy(app => app.Id).ToArray();
-        foreach (var app in apps) app.Hidden = false;
-        DockOrder.InsertAtGap(State.PinnedIds, apps.Select(app => app.Id), gap);
+        var selected = new List<string>();
+        foreach (var group in ApplicationPresentation.Group(apps)) selected.Add(PrepareApplicationPin(group.Representative, ref gap));
+        DockOrder.InsertAtGap(State.PinnedIds, selected.Distinct(StringComparer.OrdinalIgnoreCase), gap);
         if (apps.Length > 0) Save();
         if (result.failures > 0) Notify("有些文件无法加入 Dock，请选择程序或快捷方式。");
     }
@@ -195,6 +217,13 @@ public sealed class AppController : IDisposable
             else ShellLauncher.Launch(app);
         }
         catch (Exception e) { Log.Write("Launch failed: " + app.Name, e); Notify("无法打开 " + app.Name + "：" + e.Message); }
+    }
+    public void LaunchNewInstance(AppEntry app)
+    {
+        // A selected launch mode may contain a different profile or background flag.
+        // Do not replace that explicit choice with activation of an existing window.
+        try { ShellLauncher.Launch(app); }
+        catch (Exception e) { Log.Write("Launch mode failed: " + app.Name, e); Notify("无法打开 " + app.Name + "：" + e.Message); }
     }
     public void ShowCenter(string section = "Launchpad")
     {
@@ -252,7 +281,7 @@ public sealed class AppController : IDisposable
     {
         var apps = State.Apps;
         State = new AppState { Apps = apps, Settings = new DockSettings { StartWithWindows = StartupService.IsEnabled } };
-        foreach (var a in State.Apps) { a.Hidden = false; a.Category = Catalog.SuggestCategory(a); a.CategoryIsUserAssigned = false; a.CategoryRuleVersion = Catalog.CategoryRuleVersion; a.CustomIconPath = ""; }
+        foreach (var a in State.Apps) { a.Hidden = false; a.Category = ""; a.CategoryIsUserAssigned = false; a.CategoryRuleVersion = Catalog.CategoryRuleVersion; a.CustomIconPath = ""; }
         ApplySettings();
     }
     public void Notify(string message)
@@ -263,7 +292,7 @@ public sealed class AppController : IDisposable
     private void CreateTray()
     {
         var menu = new Forms.ContextMenuStrip();
-        menu.Items.Add("应用库  Ctrl+Alt+Space", null, (_, _) => ShowCenter());
+        menu.Items.Add("应用  Ctrl+Alt+Space", null, (_, _) => ShowCenter());
         menu.Items.Add("偏好设置", null, (_, _) => ShowCenter("Settings"));
         menu.Items.Add("重新扫描应用", null, async (_, _) => await RefreshAppsAsync());
         menu.Items.Add("重启 Dock", null, (_, _) => RestartDock());

@@ -8,6 +8,7 @@ using System.Windows.Media;
 using System.Windows.Automation;
 using System.Windows.Markup;
 using System.Windows.Media.Imaging;
+using System.Windows.Data;
 using System.Windows.Shapes;
 using System.Windows.Threading;
 using LumaDock.Core;
@@ -30,9 +31,9 @@ public sealed class DockWindow : Window
     private readonly Border insertionCue = new() { CornerRadius = new CornerRadius(2), Visibility = Visibility.Collapsed, BorderThickness = new Thickness(1) };
     private sealed class Tile
     {
-        public AppEntry? App; public required Button Button; public required FrameworkElement Visual;
+        public AppEntry? App; public IReadOnlyList<AppEntry> Variants = []; public required Button Button; public required FrameworkElement Visual;
         public required ScaleTransform Scale; public required TranslateTransform Move;
-        public required Border Halo; public required Ellipse Dot;
+        public required Border Halo; public required Ellipse Dot; public required DockReflection Reflection;
         public double TargetScale = 1, TargetAlong, TargetLift, TargetHalo;
     }
     private readonly List<Tile> tiles = [];
@@ -87,7 +88,7 @@ public sealed class DockWindow : Window
         Closed += (_, _) => { closed = true; ClearInsertion(); StopHover(); hover.Tick -= HoverTick; highlight.StopMotion(); hideDelay.Stop(); hideDelay.Tick -= HideTick; source?.RemoveHook(WndProc); generation++; };
         ContextMenu = new ContextMenu();
         ContextMenu.Closed += (_, _) => ScheduleHide();
-        AddMenu(ContextMenu, "打开应用库", () => controller.ShowCenter());
+        AddMenu(ContextMenu, "打开应用", () => controller.ShowCenter());
         AddMenu(ContextMenu, "添加应用…", AddFile);
         AddMenu(ContextMenu, "偏好设置", () => controller.ShowCenter("Settings"));
         AddMenu(ContextMenu, "退出 LumaDock", controller.Exit);
@@ -104,10 +105,10 @@ public sealed class DockWindow : Window
         var s = controller.State.Settings;
         var optical = s.LiquidGlass && !s.PowerSaver && !SystemParameters.HighContrast;
         var baseColor = ((SolidColorBrush)FindResource("OpaqueSurfaceBrush")).Color;
-        var opacity = Math.Clamp((controller.State.Settings.Opacity - .55) / .45, 0, 1);
+        var opacity = Math.Clamp((controller.State.Settings.Opacity - .15) / .85, 0, 1);
         var realtime = optical && s.LiveGlass;
         // Live mode uses one translucent plate; reduced/static modes retain a solid fallback.
-        baseColor.A = realtime ? (byte)(92 + 118 * opacity) : (byte)255;
+        baseColor.A = realtime ? (byte)Math.Round(14 + 158 * Math.Pow(s.Opacity, 1.85)) : (byte)255;
         if (SystemParameters.HighContrast) baseColor = SystemColors.WindowColor;
         plate.Fill = new SolidColorBrush(baseColor);
         tint.Background = optical && !realtime ? new SolidColorBrush(Color.FromArgb((byte)(5 + 72 * opacity * opacity * opacity), baseColor.R, baseColor.G, baseColor.B)) : Brushes.Transparent;
@@ -136,28 +137,48 @@ public sealed class DockWindow : Window
             scroll.HorizontalScrollBarVisibility = Vertical ? ScrollBarVisibility.Disabled : ScrollBarVisibility.Hidden;
             scroll.VerticalScrollBarVisibility = Vertical ? ScrollBarVisibility.Hidden : ScrollBarVisibility.Disabled;
             var s = controller.State.Settings;
-            bodyThickness = s.IconSize + (s.DockShape == "Rail" ? 24 : 30);
+            bodyThickness = s.IconSize + (s.DockShape == "Rail" ? 36 : 42);
             flight = Math.Ceiling(s.IconSize * s.AnimationStrength * .76) + 8;
             endReserve = Math.Ceiling(s.IconSize * s.AnimationStrength * .66) + 9;
             radius = s.DockShape switch { "Rail" => Math.Min(17, 5 + s.CornerRadius * .4), "Pebble" => Math.Min(bodyThickness / 2, 17 + s.CornerRadius * .7), _ => bodyThickness / 2 };
             var launcher = AddTile(null, LaunchpadMark(s.IconSize * .69));
             launcher.Button.Click += (_, _) => controller.ShowCenter();
             var resting = (s.Position is "Bottom" or "Right" ? flight : 12) + bodyThickness / 2 - (s.Position is "Bottom" or "Right" ? 2 : -2);
-            if (controller.State.PinnedIds.Any(id => controller.State.Apps.Any(a => a.Id == id && !a.Hidden)))
+            var groups = ApplicationPresentation.Group(controller.State.Apps.Where(a => !a.Hidden && a.IsAvailable));
+            var groupById = groups.SelectMany(group => group.Entries.Select(app => (app.Id, group)))
+                .ToDictionary(pair => pair.Id, pair => pair.group, StringComparer.OrdinalIgnoreCase);
+            var displayed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            if (controller.State.PinnedIds.Any(groupById.ContainsKey))
                 items.Children.Add(new Border { Width = Vertical ? 25 : 1, Height = Vertical ? 1 : 25, Margin = Vertical ? new Thickness(resting - 12.5, 9, 0, 9) : new Thickness(9, resting - 12.5, 9, 0), VerticalAlignment = Vertical ? VerticalAlignment.Center : VerticalAlignment.Top, HorizontalAlignment = Vertical ? HorizontalAlignment.Left : HorizontalAlignment.Center, Background = (Brush)FindResource("BorderBrush") });
             foreach (var id in controller.State.PinnedIds.ToArray())
             {
-                var app = controller.State.Apps.FirstOrDefault(a => a.Id == id && !a.Hidden);
-                if (app == null) continue;
+                if (!groupById.TryGetValue(id, out var group) || !displayed.Add(group.Representative.Id)) continue;
+                // Preserve the first saved pin's launch mode, even when the catalogue
+                // representative has different arguments. Other modes remain reachable.
+                var app = group.Entries.First(entry => entry.Id.Equals(id, StringComparison.OrdinalIgnoreCase));
                 var image = new System.Windows.Controls.Image { Width = s.IconSize, Height = s.IconSize, Stretch = Stretch.Uniform, IsHitTestVisible = false };
                 RenderOptions.SetBitmapScalingMode(image, BitmapScalingMode.HighQuality);
-                var tile = AddTile(app, image); var button = tile.Button;
+                var tile = AddTile(app, image); tile.Variants = group.Entries; var button = tile.Button;
                 button.Click += (_, _) => controller.Launch(app);
                 button.PreviewMouseLeftButtonDown += (_, e) => dragStart = e.GetPosition(this);
                 button.PreviewMouseMove += (_, e) => BeginReorder(button, app, e);
                 button.ContextMenu = new ContextMenu();
                 button.ContextMenu.Closed += (_, _) => ScheduleHide();
                 AddMenu(button.ContextMenu, "打开 / 切换到应用", () => controller.Launch(app));
+                if (group.Entries.Count > 1)
+                {
+                    var modes = new MenuItem { Header = "启动方式" };
+                    for (var index = 0; index < group.Entries.Count; index++)
+                    {
+                        var variant = group.Entries[index];
+                        var parameters = string.IsNullOrWhiteSpace(variant.Arguments) ? "默认启动" : variant.Arguments;
+                        if (parameters.Length > 64) parameters = parameters[..61] + "…";
+                        var source = variant.Source switch { "StartMenu" => "开始菜单", "Desktop" => "桌面", "AppsFolder" => "Windows 注册", _ => "手动入口" };
+                        var item = new MenuItem { Header = $"{index + 1}. {source} · {parameters}", ToolTip = $"{variant.LaunchPath}\n{variant.Arguments}\n{variant.WorkingDirectory}" };
+                        item.Click += (_, _) => controller.LaunchNewInstance(variant); modes.Items.Add(item);
+                    }
+                    button.ContextMenu.Items.Add(modes);
+                }
                 AddMenu(button.ContextMenu, "更换图标…", () => controller.ChooseIcon(app, this));
                 if (!string.IsNullOrEmpty(app.CustomIconPath)) AddMenu(button.ContextMenu, "恢复原图标", () => controller.SetCustomIcon(app, ""));
                 AddMenu(button.ContextMenu, "从 Dock 移除", () => controller.Unpin(app));
@@ -218,8 +239,13 @@ public sealed class DockWindow : Window
             dot.VerticalAlignment = VerticalAlignment.Top;
             dot.Margin = new Thickness(0, s.Position == "Top" ? 19 : cross - 19, 0, 0);
         }
-        grid.Children.Add(visual); grid.Children.Add(dot);
-        var name = app?.Name ?? "应用库 · Ctrl+Alt+Space";
+        var reflection = new DockReflection();
+        reflection.Configure(s.Position, cell, cross, resting, s.IconSize, icon.Width, icon.Height,
+            s.IconReflection && !s.PowerSaver && !SystemParameters.HighContrast ? s.ReflectionStrength : 0);
+        if (icon is System.Windows.Controls.Image image)
+            reflection.SetBinding(DockReflection.SourceProperty, new Binding(nameof(System.Windows.Controls.Image.Source)) { Source = image, Mode = BindingMode.OneWay });
+        grid.Children.Add(reflection); grid.Children.Add(visual); grid.Children.Add(dot);
+        var name = app?.Name ?? "应用 · Ctrl+Alt+Space";
         var text = new TextBlock { Text = name };
         text.SetResourceReference(TextBlock.FontFamilyProperty, "AppNameFamily");
         text.SetResourceReference(TextBlock.FontSizeProperty, "AppNameSize");
@@ -227,9 +253,9 @@ public sealed class DockWindow : Window
         text.SetResourceReference(TextBlock.FontStyleProperty, "AppNameStyle");
         text.SetResourceReference(TextBlock.ForegroundProperty, "AppNameBrush");
         var button = new Button { Content = grid, Width = grid.Width, Height = grid.Height, Padding = new Thickness(0), Margin = new Thickness(0), BorderThickness = new Thickness(0), Background = Brushes.Transparent, Template = TileTemplate, ToolTip = new ToolTip { Content = text, Placement = s.Position switch { "Top" => PlacementMode.Bottom, "Left" => PlacementMode.Right, "Right" => PlacementMode.Left, _ => PlacementMode.Top } }, Tag = app, AllowDrop = app != null, Cursor = Cursors.Hand };
-        AutomationProperties.SetName(button, app?.Name ?? "应用库");
+        AutomationProperties.SetName(button, app?.Name ?? "应用");
         ToolTipService.SetInitialShowDelay(button, 480); ToolTipService.SetBetweenShowDelay(button, 100);
-        var tile = new Tile { App = app, Button = button, Visual = visual, Scale = scale, Move = move, Halo = halo, Dot = dot };
+        var tile = new Tile { App = app, Button = button, Visual = visual, Scale = scale, Move = move, Halo = halo, Dot = dot, Reflection = reflection };
         button.GotKeyboardFocus += (_, _) => FocusTile(tile);
         button.LostKeyboardFocus += (_, _) => { if (!IsMouseOver) ResetMagnification(); };
         items.Children.Add(button); tiles.Add(tile); return tile;
@@ -251,7 +277,7 @@ public sealed class DockWindow : Window
 
     public void RefreshWindows()
     {
-        foreach (var tile in tiles) tile.Dot.Opacity = tile.App != null && controller.Tracker.IsRunning(tile.App) ? .9 : 0;
+        foreach (var tile in tiles) tile.Dot.Opacity = tile.App != null && tile.Variants.Any(controller.Tracker.IsRunning) ? .9 : 0;
         if (controller.Tracker.IsForegroundFullscreenOnMonitor(controller.State.Settings.MonitorDevice))
         {
             if (IsVisible) Hide();
@@ -284,7 +310,7 @@ public sealed class DockWindow : Window
         items.Margin = tucked ? new Thickness(0) : Vertical ? new Thickness(0, endReserve + 14, 0, endReserve + 14) : new Thickness(endReserve + 14, 0, endReserve + 14, 0);
         foreach (var layer in new[] { plate, finish })
         {
-            layer.Shape = s.DockShape; layer.Radius = radius; layer.Accent = Theme.AccentColor; layer.Dark = Theme.IsDark; layer.Vertical = Vertical; layer.InvalidateVisual();
+            layer.Shape = s.DockShape; layer.Radius = radius; layer.Accent = Theme.AccentColor; layer.Dark = Theme.IsDark; layer.Vertical = Vertical; layer.OutwardEnd = s.Position is "Bottom" or "Right"; layer.InvalidateVisual();
         }
         body.Clip = DockPlate.Contour(new Size(Math.Max(0, Width - margin.Left - margin.Right), Math.Max(0, Height - margin.Top - margin.Bottom)), s.DockShape, radius);
         liquid.CornerRadiusOverride = radius;
@@ -364,7 +390,9 @@ public sealed class DockWindow : Window
     {
         if (controller.ReducedMotion || !IsVisible || tucked || dragging) { StopHover(); return; }
         var now = Environment.TickCount64; var delta = Math.Clamp(now - hoverTick, 1, 64); hoverTick = now;
-        var factor = 1 - Math.Exp(-delta / 42d); var moving = false;
+        // A frame-time based response stays continuous across fast pointer reversals,
+        // while its finite settle still releases the only hover timer at rest.
+        var factor = 1 - Math.Exp(-delta / 54d); var moving = false;
         foreach (var tile in tiles)
         {
             var scale = Approach(tile.Scale.ScaleX, tile.TargetScale, factor, .001);
@@ -372,6 +400,7 @@ public sealed class DockWindow : Window
             var lift = tile.TargetLift * (controller.State.Settings.Position is "Bottom" or "Right" ? -1 : 1);
             var x = Vertical ? lift : tile.TargetAlong; var y = Vertical ? tile.TargetAlong : lift;
             tile.Move.X = Approach(tile.Move.X, x, factor, .015); tile.Move.Y = Approach(tile.Move.Y, y, factor, .015);
+            tile.Reflection.SetPose(scale, Vertical ? tile.Move.Y : tile.Move.X, Vertical ? tile.Move.X : tile.Move.Y);
             tile.Halo.Opacity = Approach(tile.Halo.Opacity, tile.TargetHalo, factor, .002);
             moving |= scale != tile.TargetScale || tile.Move.X != x || tile.Move.Y != y || tile.Halo.Opacity != tile.TargetHalo;
         }
@@ -381,7 +410,12 @@ public sealed class DockWindow : Window
     private void StopHover()
     {
         hover.Stop(); lastPointer = new(double.NaN, double.NaN);
-        foreach (var tile in tiles) { tile.Scale.ScaleX = tile.Scale.ScaleY = tile.TargetScale = 1; tile.Move.X = tile.Move.Y = tile.TargetAlong = tile.TargetLift = tile.TargetHalo = tile.Halo.Opacity = 0; }
+        foreach (var tile in tiles)
+        {
+            tile.Scale.ScaleX = tile.Scale.ScaleY = tile.TargetScale = 1;
+            tile.Move.X = tile.Move.Y = tile.TargetAlong = tile.TargetLift = tile.TargetHalo = tile.Halo.Opacity = 0;
+            tile.Reflection.SetPose(1, 0, 0);
+        }
     }
 
     private void BeginReorder(Button button, AppEntry app, MouseEventArgs e)
@@ -429,6 +463,23 @@ public sealed class DockWindow : Window
         }
         return apps.Length;
     }
+    private int SavedInsertionGap(int visibleGap)
+    {
+        var apps = tiles.Where(tile => tile.App != null).ToArray();
+        if (apps.Length == 0) return controller.State.PinnedIds.Count;
+        // Unavailable pins and alternate launch records stay in the saved list.
+        // Resolve the visible gap against its actual saved anchor before applying
+        // DockOrder, which is intentionally defined in the original list's indices.
+        if (visibleGap < apps.Length)
+        {
+            var anchor = apps[Math.Max(0, visibleGap)].App!.Id;
+            var index = controller.State.PinnedIds.FindIndex(id => id.Equals(anchor, StringComparison.OrdinalIgnoreCase));
+            return index >= 0 ? index : controller.State.PinnedIds.Count;
+        }
+        var last = apps[^1].App!.Id;
+        var lastIndex = controller.State.PinnedIds.FindIndex(id => id.Equals(last, StringComparison.OrdinalIgnoreCase));
+        return lastIndex >= 0 ? lastIndex + 1 : controller.State.PinnedIds.Count;
+    }
     private void ShowInsertion(object sender, DragEventArgs e)
     {
         e.Handled = true;
@@ -454,7 +505,7 @@ public sealed class DockWindow : Window
     private void ClearInsertion() => insertionCue.Visibility = Visibility.Collapsed;
     private async void DropItems(object sender, DragEventArgs e)
     {
-        var gap = InsertionGap(e.GetPosition(this));
+        var gap = SavedInsertionGap(InsertionGap(e.GetPosition(this)));
         var id = DraggedId(e.Data);
         var paths = id == null && e.Data.GetDataPresent(DataFormats.FileDrop) ? e.Data.GetData(DataFormats.FileDrop) as string[] : null;
         e.Handled = true; ClearInsertion();

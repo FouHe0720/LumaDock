@@ -58,9 +58,49 @@ internal static class Program
                 {
                     var buttons = Tiles(dock).Select(t => Field<Button>(t, "Button")).ToArray();
                     Require(buttons.Length == 8, "The actual pin/launcher action count changed.");
-                    Require(buttons.Select(System.Windows.Automation.AutomationProperties.GetName).SequenceEqual(new[] { "应用库" }.Concat(controller.State.Apps.Select(a => a.Name))), "Dock accessibility names do not match records.");
+                    Require(buttons.Select(System.Windows.Automation.AutomationProperties.GetName).SequenceEqual(new[] { "应用" }.Concat(controller.State.Apps.Select(a => a.Name))), "Dock accessibility names do not match records.");
                 });
                 Check("Dock hover is dormant at rest", () => Require(!Field<DispatcherTimer>(dock, "hover").IsEnabled, "Hover timer is running without input."));
+                Check("Launcher reflection reuses its actual frozen artwork without another bitmap", () =>
+                {
+                    var tile = Tiles(dock)[0];
+                    var image = ((Grid)Field<FrameworkElement>(tile, "Visual")).Children.OfType<Image>().Single();
+                    var reflection = Field<FrameworkElement>(tile, "Reflection");
+                    Require(ReferenceEquals(image.Source, reflection.GetType().GetProperty("Source")!.GetValue(reflection)), "The reflection is not sharing the icon's real source.");
+                    Require(image.Source.IsFrozen && !reflection.IsHitTestVisible, "Reflection artwork is mutable or intercepts input.");
+                });
+                foreach (var direction in new[] { "Bottom", "Top", "Left", "Right" })
+                {
+                    Check($"{direction} reflection mirrors actual icon pixels toward the outer edge and fades away", () => CheckReflectionPixels(direction));
+                }
+                Check("Missing or disabled reflection paints no invented fallback", () =>
+                {
+                    var reflection = CreateReflection("Bottom", 0);
+                    SetReflectionSource(reflection, ColorIcon());
+                    Require(RenderPixels(reflection).All(value => value == 0), "Disabled reflection drew content.");
+                    Call(reflection, "Configure", "Bottom", 88d, 160d, 70d, 64d, 64d, 64d, .4);
+                    SetReflectionSource(reflection, null);
+                    Require(RenderPixels(reflection).All(value => value == 0), "A missing icon acquired fallback artwork.");
+                });
+                Check("A changed cached icon source refreshes the mirror, including a non-square source", () =>
+                {
+                    var reflection = CreateReflection("Bottom", .4); var source = ColorIcon();
+                    SetReflectionSource(reflection, source); var first = RenderPixels(reflection);
+                    var replacement = BitmapSource.Create(32, 16, 96, 96, PixelFormats.Bgra32, null,
+                        Enumerable.Range(0, 32 * 16).SelectMany(_ => new byte[] { 255, 0, 255, 255 }).ToArray(), 32 * 4);
+                    replacement.Freeze(); SetReflectionSource(reflection, replacement); var second = RenderPixels(reflection);
+                    Require(!first.SequenceEqual(second) && ReferenceEquals(reflection.GetType().GetProperty("Source")!.GetValue(reflection), replacement), "Mirror did not update its real source or made a private bitmap copy.");
+                });
+                var temporarilyMissing = controller.State.Apps[2]; var preservedPins = controller.State.PinnedIds.ToArray();
+                temporarilyMissing.IsAvailable = false; dock.Rebuild(); await Frame();
+                Check("An unavailable application leaves the Dock without losing its saved pin", () =>
+                {
+                    Require(Tiles(dock).All(tile => Field<AppEntry?>(tile, "App")?.Id != temporarilyMissing.Id), "An unavailable application is still shown.");
+                    Require(controller.State.PinnedIds.SequenceEqual(preservedPins), "Filtering an unavailable application deleted or reordered its saved pin.");
+                });
+                temporarilyMissing.IsAvailable = true; dock.Rebuild(); await Frame();
+                Check("A restored application reappears at its saved Dock position", () =>
+                    Require(Tiles(dock).Skip(1).Select(tile => Field<AppEntry>(tile, "App").Id).SequenceEqual(preservedPins), "Restored application did not recover its saved position."));
                 Check("Drag identity and native format queries start without creating a transfer file", () =>
                 {
                     var created = 0;
@@ -123,6 +163,60 @@ internal static class Program
                         Require(Field<Border>(dock, "insertionCue").Visibility == Visibility.Collapsed && !Field<DispatcherTimer>(dock, "hover").IsEnabled, "Drag feedback retained a cue or animation after cancellation.");
                     });
                 }
+                var scenarioApps = controller.State.Apps.ToArray();
+                var modePath = Path.Combine(profile, "launch-modes.exe"); File.Copy(scenarioApps[0].ExecutablePath, modePath);
+                var modes = Enumerable.Range(1, 3).Select(index => new AppEntry { Id = "mode" + index, Name = "Launch mode fixture", LaunchPath = modePath, ExecutablePath = modePath, Arguments = "--profile=" + index }).ToArray();
+                var missingHead = new AppEntry { Id = "unavailable-head", Name = "Temporarily unavailable head", LaunchPath = scenarioApps[0].LaunchPath, ExecutablePath = scenarioApps[0].ExecutablePath, Arguments = "--offline-head", IsAvailable = false };
+                var missingTail = new AppEntry { Id = "unavailable-tail", Name = "Temporarily unavailable tail", LaunchPath = scenarioApps[0].LaunchPath, ExecutablePath = scenarioApps[0].ExecutablePath, Arguments = "--offline-tail", IsAvailable = false };
+                controller.State.Apps = scenarioApps.Concat(modes).Concat([missingHead, missingTail]).ToList();
+                var mixedPins = new[] { missingHead.Id, originalPins[0], modes[0].Id, modes[1].Id }.Concat(originalPins.Skip(1)).Concat([missingTail.Id]).ToArray();
+                controller.State.PinnedIds = mixedPins.ToList(); dock.UpdateSettings(); await Frame();
+                Check("Alternate saved launch modes occupy one Dock icon while all mode records and pins survive", () =>
+                {
+                    var grouped = Tiles(dock).Where(tile => Field<AppEntry?>(tile, "App")?.Name == modes[0].Name).ToArray();
+                    Require(grouped.Length == 1 && Field<AppEntry>(grouped[0], "App").Id == modes[0].Id, "Dock duplicated a program or changed its first saved launch mode.");
+                    Require(Field<IReadOnlyList<AppEntry>>(grouped[0], "Variants").Count == 3, "The Dock lost an unpinned alternate launch mode.");
+                    var submenu = Field<Button>(grouped[0], "Button").ContextMenu!.Items.OfType<MenuItem>().Single(item => Equals(item.Header, "启动方式"));
+                    Require(submenu.Items.Count == 3 && submenu.Items.OfType<MenuItem>().Select(item => item.ToolTip!.ToString()).All(tip => tip!.Contains("--profile=")), "Real mode arguments are not available in the context menu.");
+                    Require(controller.State.PinnedIds.SequenceEqual(mixedPins) && controller.State.Apps.Count == scenarioApps.Length + 5, "Presentation grouping destructively changed saved records or pins.");
+                });
+                foreach (var position in new[] { "Bottom", "Top", "Left", "Right" })
+                {
+                    controller.State.Settings.Position = position; dock.UpdateSettings(); await Frame();
+                    Check($"{position} visible insertion gaps map through unavailable and grouped saved pins", () =>
+                    {
+                        var displayedApps = Tiles(dock).Skip(1).Select(tile => Field<AppEntry>(tile, "App")).ToArray();
+                        for (var gap = 0; gap < displayedApps.Length; gap++)
+                            Require(Invoke<int>(dock, "SavedInsertionGap", gap) == Array.IndexOf(mixedPins, displayedApps[gap].Id), "A visible gap was treated as a raw saved index.");
+                        Require(Invoke<int>(dock, "SavedInsertionGap", displayedApps.Length) == Array.IndexOf(mixedPins, displayedApps[^1].Id) + 1, "The final gap crossed an unrelated latent trailing pin.");
+                    });
+                }
+                foreach (var (moving, gap) in new[] { (scenarioApps[2], 1), (scenarioApps[0], 3) })
+                {
+                    controller.State.PinnedIds = mixedPins.ToList(); dock.UpdateSettings(); await Frame();
+                    var savedGap = Invoke<int>(dock, "SavedInsertionGap", gap);
+                    var expectedPins = mixedPins.ToList(); DockOrder.InsertAtGap(expectedPins, [moving.Id], savedGap);
+                    controller.PinAt(moving, savedGap); dock.Rebuild(); await Frame();
+                    Check($"A real pin command at visible gap {gap} preserves latent pins and saves the intended raw order", () =>
+                    {
+                        Require(controller.State.PinnedIds.SequenceEqual(expectedPins), "The visible insertion command moved to a different saved slot.");
+                        Require(new StateStore(profile).Load().PinnedIds.SequenceEqual(expectedPins), "The mapped order did not survive persistence.");
+                        Require(controller.State.PinnedIds[0] == missingHead.Id && controller.State.PinnedIds[^1] == missingTail.Id, "An unrelated unavailable pin moved or disappeared.");
+                    });
+                }
+                controller.State.PinnedIds = mixedPins.ToList(); missingHead.IsAvailable = missingTail.IsAvailable = true; dock.UpdateSettings(); await Frame();
+                Check("Previously unavailable pins recover their saved positions around a grouped application", () =>
+                {
+                    var expectedVisible = mixedPins.Where(id => id != modes[1].Id);
+                    Require(Tiles(dock).Skip(1).Select(tile => Field<AppEntry>(tile, "App").Id).SequenceEqual(expectedVisible), "Restoring availability reordered a latent pin or exposed duplicate modes.");
+                });
+                controller.Unpin(modes[1]); dock.Rebuild(); await Frame();
+                Check("Removing a grouped Dock application unpins its modes without deleting metadata or source files", () =>
+                {
+                    Require(!controller.State.PinnedIds.Any(id => modes.Select(mode => mode.Id).Contains(id)), "A second saved mode reappeared after removing the application.");
+                    Require(modes.All(mode => controller.State.Apps.Contains(mode)) && File.Exists(modePath), "Unpinning removed a mode record or real source.");
+                });
+                controller.State.Apps = scenarioApps.ToList(); controller.State.PinnedIds = originalPins.ToList(); dock.UpdateSettings(); await Frame();
                 Check("Pinning between two icons saves the exact order and preserves the original application", () =>
                 {
                     var moving = controller.State.Apps[0]; var path = moving.LaunchPath;
@@ -176,6 +270,7 @@ internal static class Program
                             Require(scale.ScaleX > 1.34, "Default hover does not visibly magnify the focused icon.");
                             CheckBounds(dock);
                             Require(!Field<DispatcherTimer>(dock, "hover").IsEnabled, "The hover timer did not stop after settling.");
+                            CheckReflectionBounds(dock);
                             var transform = Field<TranslateTransform>(tile, "Move");
                             var lift = position is "Bottom" or "Top" ? transform.Y : transform.X;
                             Require(position is "Bottom" or "Right" ? lift < -5 : lift > 5, "The icon does not rise toward the work area.");
@@ -198,6 +293,7 @@ internal static class Program
                     Check($"Maximum-size {position} hover is bounded and influences neighbouring icons", () =>
                     {
                         CheckBounds(dock);
+                        CheckReflectionBounds(dock);
                         Require(Field<ScaleTransform>(Tiles(dock)[4], "Scale").ScaleX > 1.79, "Maximum hover scale was not applied.");
                         Require(Field<ScaleTransform>(Tiles(dock)[3], "Scale").ScaleX > 1.1, "Neighbouring icons did not respond.");
                         Require(!Field<DispatcherTimer>(dock, "hover").IsEnabled, "Maximum hover did not settle.");
@@ -261,7 +357,23 @@ internal static class Program
                     Require(!Field<DispatcherTimer>(dock, "hover").IsEnabled, "Power saving retained a hover clock.");
                     var fill = Field<object>(dock, "plate").GetType().GetProperty("Fill")!.GetValue(Field<object>(dock, "plate")) as SolidColorBrush;
                     Require(fill?.Color.A == 255, "Power saving does not retain an opaque plate.");
+                    Require(Tiles(dock).All(tile => RenderPixels(Field<FrameworkElement>(tile, "Reflection")).All(value => value == 0)), "Power saving retained icon reflections.");
                 });
+                controller.State.Settings.PowerSaver = false; controller.State.Settings.LiveGlass = true; controller.State.Settings.LiquidGlass = true;
+                controller.State.Settings.Opacity = .7; dock.UpdateSettings(); await Frame();
+                Check("Default live glass keeps a clear low-alpha plate and no duplicate tint", () =>
+                {
+                    var fill = (SolidColorBrush)Field<object>(dock, "plate").GetType().GetProperty("Fill")!.GetValue(Field<object>(dock, "plate"))!;
+                    Require(fill.Color.A is >= 80 and <= 110, "The default plate is too opaque to reveal the desktop.");
+                    Require(((SolidColorBrush)Field<Border>(dock, "tint").Background).Color.A == 0, "Live glass adds a second tint layer.");
+                });
+                controller.State.Settings.IconReflection = false; dock.UpdateSettings(); await Frame();
+                Check("Reflection toggle removes mirror content without an idle frame loop", () =>
+                {
+                    Require(Tiles(dock).All(tile => RenderPixels(Field<FrameworkElement>(tile, "Reflection")).All(value => value == 0)), "Reflection toggle did not clear the artwork.");
+                    Require(!Field<DispatcherTimer>(dock, "hover").IsEnabled, "Reflection toggle left a hover timer running.");
+                });
+                controller.State.Settings.IconReflection = true;
                 controller.State.Settings.PowerSaver = false; controller.State.Settings.AutoHide = true; dock.UpdateSettings(); await Frame();
                 MoveTo(dock, Tiles(dock)[2]); await Settle();
                 Call(dock, "HideTick", null, EventArgs.Empty); await Frame();
@@ -322,6 +434,62 @@ internal static class Program
             var visual = Field<FrameworkElement>(tile, "Visual");
             var rect = visual.TransformToAncestor(dock).TransformBounds(new Rect(visual.RenderSize));
             Require(rect.Left >= -.5 && rect.Top >= -.5 && rect.Right <= dock.ActualWidth + .5 && rect.Bottom <= dock.ActualHeight + .5, $"Transformed icon leaves its window: {rect} vs {dock.ActualWidth}x{dock.ActualHeight}.");
+        }
+    }
+    private static FrameworkElement CreateReflection(string position, double strength)
+    {
+        var type = typeof(DockWindow).Assembly.GetType("LumaDock.App.DockReflection")!;
+        var reflection = (FrameworkElement)Activator.CreateInstance(type)!;
+        Call(reflection, "Configure", position, 88d, 160d, 70d, 64d, 64d, 64d, strength);
+        return reflection;
+    }
+    private static void SetReflectionSource(FrameworkElement reflection, ImageSource? source) => reflection.GetType().GetProperty("Source")!.SetValue(reflection, source);
+    private static BitmapSource ColorIcon()
+    {
+        var pixels = new byte[64 * 64 * 4];
+        for (var y = 0; y < 64; y++) for (var x = 0; x < 64; x++)
+        {
+            var color = (x < 32, y < 32) switch { (true, true) => Colors.Red, (false, true) => Colors.Lime, (true, false) => Colors.Blue, _ => Colors.Yellow };
+            var i = (y * 64 + x) * 4; pixels[i] = color.B; pixels[i + 1] = color.G; pixels[i + 2] = color.R; pixels[i + 3] = 255;
+        }
+        var image = BitmapSource.Create(64, 64, 96, 96, PixelFormats.Bgra32, null, pixels, 64 * 4); image.Freeze(); return image;
+    }
+    private static byte[] RenderPixels(FrameworkElement element)
+    {
+        element.Measure(new Size(element.Width, element.Height)); element.Arrange(new Rect(0, 0, element.Width, element.Height)); element.UpdateLayout();
+        var bitmap = new RenderTargetBitmap((int)Math.Ceiling(element.Width), (int)Math.Ceiling(element.Height), 96, 96, PixelFormats.Pbgra32);
+        bitmap.Render(element); var pixels = new byte[bitmap.PixelWidth * bitmap.PixelHeight * 4]; bitmap.CopyPixels(pixels, bitmap.PixelWidth * 4, 0); return pixels;
+    }
+    private static void CheckReflectionPixels(string position)
+    {
+        var reflection = CreateReflection(position, .4); SetReflectionSource(reflection, ColorIcon());
+        var pixels = RenderPixels(reflection); var width = (int)reflection.Width;
+        var outerEnd = position is "Bottom" or "Right"; var vertical = position is "Left" or "Right";
+        var plane = 70 + (outerEnd ? 33.5 : -33.5);
+        var cross = (int)Math.Round(plane + (outerEnd ? 5 : -5));
+        var point = vertical ? new Point(cross, 29) : new Point(29, cross);
+        var index = ((int)point.Y * width + (int)point.X) * 4;
+        var expected = position switch { "Bottom" => Colors.Blue, "Top" or "Left" => Colors.Red, _ => Colors.Lime };
+        Require(pixels[index + 3] > 10, "Mirror has no visible real source pixels.");
+        Require(expected.B == 0 ? pixels[index] < 3 : pixels[index] > 10, "Mirrored blue channel does not match the outer source edge.");
+        Require(expected.G == 0 ? pixels[index + 1] < 3 : pixels[index + 1] > 10, "Mirrored green channel does not match the outer source edge.");
+        Require(expected.R == 0 ? pixels[index + 2] < 3 : pixels[index + 2] > 10, "Mirrored red channel does not match the outer source edge.");
+        var far = (int)Math.Round(plane + (outerEnd ? 18 : -18));
+        var farIndex = vertical ? (29 * width + far) * 4 : (far * width + 29) * 4;
+        Require(pixels[farIndex + 3] < pixels[index + 3] / 2, "The reflection does not fade away from its glass plane.");
+    }
+    private static void CheckReflectionBounds(DockWindow dock)
+    {
+        foreach (var tile in Tiles(dock))
+        {
+            var reflection = Field<FrameworkElement>(tile, "Reflection");
+            var type = reflection.GetType();
+            var shelf = (Rect)type.GetProperty("ShelfBounds", Private)!.GetValue(reflection)!;
+            var mirror = (Rect)type.GetProperty("MirroredImageBounds", Private)!.GetValue(reflection)!;
+            mirror.Intersect(shelf);
+            if (mirror.IsEmpty) continue;
+            var bounds = reflection.TransformToAncestor(dock).TransformBounds(mirror);
+            Require(bounds.Left >= -.5 && bounds.Top >= -.5 && bounds.Right <= dock.ActualWidth + .5 && bounds.Bottom <= dock.ActualHeight + .5, "A reflected icon leaves the Dock window.");
         }
     }
     private static object Snapshot(DockWindow dock, string shape, string position) => new { shape, position, width = dock.ActualWidth, height = dock.ActualHeight, scales = Tiles(dock).Select(t => Field<ScaleTransform>(t, "Scale").ScaleX).ToArray(), timerRunning = Field<DispatcherTimer>(dock, "hover").IsEnabled };

@@ -26,7 +26,7 @@ try {
         "typography-ui-$LumaShortVersion-results.json","compositor-ui-$LumaShortVersion-results.json",
         "windows-results-$LumaShortVersion.json","icon-results-$LumaShortVersion.json",
         "ui-results-$LumaShortVersion.json","backdrop-results-$LumaShortVersion.json",
-        "font-results-$LumaShortVersion.json","catalog-audit-$LumaShortVersion-results.json",
+        "font-results-$LumaShortVersion.json","catalog-audit-$LumaShortVersion-results.json","inventory-$LumaShortVersion-results.json",
         "drag-interaction-$LumaShortVersion-results.json",
         "inspection-comparison-$LumaShortVersion-results.json",
         "portable-smoke-$LumaShortVersion-results.json","shortcut-$LumaShortVersion-results.json")

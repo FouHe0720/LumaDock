@@ -3,7 +3,8 @@ param(
     [ValidateRange(15,86400)][int]$Seconds = 120,
     [ValidateRange(1,60)][int]$IntervalSeconds = 5,
     [ValidateRange(0,120)][int]$WarmupSeconds = 15,
-    [switch]$ShowLaunchpad
+    [switch]$ShowLaunchpad,
+    [string]$SeedConfig = ''
 )
 # Measurement is outside the app. Only the process created here is terminated.
 . "$PSScriptRoot\_common.ps1"
@@ -52,6 +53,12 @@ $LumaBinaryManifest = foreach ($LumaBinaryName in @('LumaDock.exe', 'LumaDock.dl
 $LumaBinaryManifest | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $LumaRunDir 'binary-manifest.json') -Encoding utf8
 $LumaDiagnosticDir = Join-Path $LumaRunDir 'diagnostics'
 $LumaDataDir = Join-Path $LumaRunDir 'data'
+if ($SeedConfig) {
+    $LumaSeedPath = (Resolve-Path -LiteralPath $SeedConfig).Path
+    if ((Get-Item -LiteralPath $LumaSeedPath).Length -gt 16MB) { throw '测试配置超过 16 MB。' }
+    New-Item -ItemType Directory -Path $LumaDataDir -Force | Out-Null
+    Copy-Item -LiteralPath $LumaSeedPath -Destination (Join-Path $LumaDataDir 'config.json')
+}
 $LumaArguments = '--data-dir "' + $LumaDataDir + '" --diagnostics-dir "' + $LumaDiagnosticDir + '"'
 if ($ShowLaunchpad) { $LumaArguments += ' --show-launchpad' }
 $LumaTimer = [Diagnostics.Stopwatch]::StartNew()
@@ -103,6 +110,8 @@ finally {
 }
 $LumaStartupPath = Join-Path $LumaDiagnosticDir 'startup.json'
 $LumaStartup = if (Test-Path -LiteralPath $LumaStartupPath) { Get-Content -LiteralPath $LumaStartupPath -Raw | ConvertFrom-Json } else { $null }
+$LumaFinalConfigPath = Join-Path $LumaDataDir 'config.json'
+$LumaFinalConfig = if (Test-Path -LiteralPath $LumaFinalConfigPath) { Get-Content -LiteralPath $LumaFinalConfigPath -Raw | ConvertFrom-Json } else { $null }
 $LumaSummary = [ordered]@{
     measuredAt = (Get-Date).ToString('o')
     executable = $Executable
@@ -113,6 +122,9 @@ $LumaSummary = [ordered]@{
     requestedMeasurementSeconds = $Seconds
     actualTotalSeconds = [math]::Round($LumaTimer.Elapsed.TotalSeconds, 3)
     launchpadOpen = [bool]$ShowLaunchpad
+    seededConfiguration = [bool]$SeedConfig
+    configuredPinnedApps = if ($LumaFinalConfig) { @($LumaFinalConfig.PinnedIds).Count } else { $null }
+    iconReflectionEnabled = if ($LumaFinalConfig) { [bool]$LumaFinalConfig.Settings.IconReflection } else { $null }
     sampleCount = $LumaSamples.Count
     foregroundSamples = @($LumaSamples | Where-Object isForeground).Count
     nativeCaretSamples = @($LumaSamples | Where-Object hasNativeCaret).Count

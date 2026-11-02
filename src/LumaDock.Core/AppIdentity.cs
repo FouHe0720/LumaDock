@@ -7,8 +7,10 @@ public static class AppIdentity
 {
     private static readonly StringComparer Paths = StringComparer.OrdinalIgnoreCase;
     // This Chromium switch records the shortcut's launch location. It does not select a profile, URL or app.
-    // Only remove a complete, unquoted switch for known browser executables; unknown switches remain significant.
+    // Only remove a complete, unquoted switch for known executables; unknown switches remain significant.
     private static readonly Regex ShortcutAttribution = new(@"^--source-shortcut-location=[a-zA-Z0-9_-]+$", RegexOptions.Compiled | RegexOptions.CultureInvariant);
+    private static readonly HashSet<string> SharedHosts = new(StringComparer.OrdinalIgnoreCase)
+    { "applicationframehost.exe", "wwahost.exe", "runtimebroker.exe", "explorer.exe", "rundll32.exe", "dllhost.exe", "svchost.exe", "mmc.exe", "cmd.exe", "powershell.exe", "pwsh.exe", "wscript.exe", "cscript.exe", "java.exe", "javaw.exe", "dotnet.exe", "python.exe", "pythonw.exe", "electron.exe", "msedge.exe", "chrome.exe", "msedge_proxy.exe", "chrome_proxy.exe" };
 
     public static bool AreEquivalent(AppEntry left, AppEntry right)
     {
@@ -20,10 +22,13 @@ public static class AppIdentity
         if (leftDirectory.Length > 0 && rightDirectory.Length > 0 && !Paths.Equals(leftDirectory, rightDirectory)) return false;
         var leftArguments = Arguments(left); var rightArguments = Arguments(right);
         if (!string.Equals(leftArguments, rightArguments, StringComparison.Ordinal)) return false;
-        var leftId = left.AppUserModelId?.Trim() ?? ""; var rightId = right.AppUserModelId?.Trim() ?? "";
-        if (leftId.Length > 0 && rightId.Length > 0 && !Paths.Equals(leftId, rightId)) return false;
-        if (leftLaunch.Length > 0 && Paths.Equals(leftLaunch, rightLaunch)) return true;
+        var leftUri = GetLaunchUri(left); var rightUri = GetLaunchUri(right);
+        if (leftUri.Length > 0 || rightUri.Length > 0) return leftUri.Length > 0 && string.Equals(leftUri, rightUri, StringComparison.Ordinal);
         var leftTarget = NormalizePath(left.ExecutablePath); var rightTarget = NormalizePath(right.ExecutablePath);
+        var leftId = left.AppUserModelId?.Trim() ?? ""; var rightId = right.AppUserModelId?.Trim() ?? "";
+        if (leftId.Length > 0 && rightId.Length > 0 && !Paths.Equals(leftId, rightId)
+            && !(leftTarget.Length > 0 && Paths.Equals(leftTarget, rightTarget) && IsDirectProgram(leftTarget) && !leftId.Contains('!') && !rightId.Contains('!'))) return false;
+        if (leftLaunch.Length > 0 && Paths.Equals(leftLaunch, rightLaunch)) return true;
         if (leftTarget.Length > 0 && rightTarget.Length > 0) return Paths.Equals(leftTarget, rightTarget);
         return leftId.Length > 0 && rightId.Length > 0 && Paths.Equals(leftId, rightId);
     }
@@ -34,6 +39,8 @@ public static class AppIdentity
         var launch = NormalizePath(app.LaunchPath);
         if (launch.Length > 0) yield return "file:" + launch.ToUpperInvariant();
         var arguments = Arguments(app);
+        var uri = GetLaunchUri(app);
+        if (uri.Length > 0) yield return "uri:" + uri + "|" + arguments;
         var target = NormalizePath(app.ExecutablePath);
         if (target.Length > 0) yield return "target:" + target.ToUpperInvariant() + "|" + arguments;
         if (!string.IsNullOrWhiteSpace(app.AppUserModelId)) yield return "aumid:" + app.AppUserModelId.Trim().ToUpperInvariant() + "|" + arguments;
@@ -45,11 +52,28 @@ public static class AppIdentity
         var target = NormalizePath(app.ExecutablePath);
         var name = target[(target.LastIndexOf('\\') + 1)..];
         if (name.Equals("msedge.exe", StringComparison.OrdinalIgnoreCase) || name.Equals("chrome.exe", StringComparison.OrdinalIgnoreCase))
-            arguments = RemoveAttribution(arguments);
+            arguments = RemoveAttribution(arguments, token => ShortcutAttribution.IsMatch(token));
+        else if (name.Equals("Weixin.exe", StringComparison.OrdinalIgnoreCase) || name.Equals("WeChat.exe", StringComparison.OrdinalIgnoreCase))
+            arguments = RemoveAttribution(arguments, token => token == "--scene=desktop");
+        else if (name.Equals("ksolaunch.exe", StringComparison.OrdinalIgnoreCase))
+            arguments = RemoveAttribution(arguments, token => token is "/from=startmenu" or "/from=desktop_shortcut");
         return arguments;
     }
 
-    private static string RemoveAttribution(string arguments)
+    private static bool IsDirectProgram(string target) => Path.IsPathFullyQualified(target) && target.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)
+        && !SharedHosts.Contains(target[(target.LastIndexOf('\\') + 1)..]);
+
+    public static string NormalizeLaunchUri(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value) || value.Length > 8192 || value.Any(char.IsControl)) return "";
+        return Uri.TryCreate(value.Trim(), UriKind.Absolute, out var uri) && !uri.IsFile && uri.Scheme.Length > 1
+            && !uri.Scheme.Equals("shell", StringComparison.OrdinalIgnoreCase) ? uri.AbsoluteUri : "";
+    }
+
+    private static string GetLaunchUri(AppEntry app) => new[] { app.LaunchUri, app.ExecutablePath, app.AppUserModelId }
+        .Select(NormalizeLaunchUri).FirstOrDefault(value => value.Length > 0) ?? "";
+
+    private static string RemoveAttribution(string arguments, Func<string, bool> isAttribution)
     {
         var kept = new List<string>(); var start = 0; var quoted = false; var slashes = 0; var removed = false;
         for (var i = 0; i <= arguments.Length; i++)
@@ -61,7 +85,7 @@ public static class AppIdentity
                 if (i > start)
                 {
                     var token = arguments[start..i];
-                    if (ShortcutAttribution.IsMatch(token)) removed = true; else kept.Add(token);
+                    if (isAttribution(token)) removed = true; else kept.Add(token);
                 }
                 start = i + 1;
             }

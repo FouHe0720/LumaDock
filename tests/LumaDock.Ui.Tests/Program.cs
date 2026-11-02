@@ -44,16 +44,22 @@ internal static class Program
                 controller.State.Settings.Animations = false;
                 controller.State.Settings.CloseToTray = true;
                 await controller.RefreshAppsAsync(); // Read-only scan, one time; saves only the isolated sandbox.
-                realApps = controller.State.Apps.Count;
+                realApps = ApplicationPresentation.Group(controller.State.Apps.Where(entry => !entry.Hidden && entry.IsAvailable)).Count;
                 Require(realApps > 0, "DiscoveryEmpty");
+                Require(controller.State.Categories.Count == 0 && controller.State.Apps.All(entry => entry.Category.Length == 0), "FreshProfileHasAutomaticColumns");
                 window = NewWindow(controller);
                 window.Show(); await Frame();
                 Require(window.IsVisible, "InitialShow");
                 window.Navigate("Settings"); await Frame();
                 window.Navigate("Desktop"); await Frame();
+                Require(window.CurrentSection == "Launchpad", "LegacyDesktopDidNotUseUnifiedView");
+                Require(Descendants<Button>(window).Count(button => Equals(button.Tag, "Navigation:Launchpad")) == 1
+                    && !Descendants<Button>(window).Any(button => Equals(button.Tag, "Navigation:Desktop") || Equals(button.Tag, "Dock 已固定")), "DuplicateDefaultNavigation");
+                var firstPageIds = Descendants<Button>(window).Select(button => button.DataContext).OfType<AppTileViewModel>().Select(model => model.Entry.Id).ToArray();
+                Require(firstPageIds.Length > 0 && firstPageIds.Distinct().Count() == firstPageIds.Length, "DuplicateVisibleApplication");
                 window.HideSmoothly(); await Frame();
                 heapBefore = GC.GetTotalMemory(true); samples.Add(Sample("warmBeforeCycles"));
-                var target = controller.State.Apps.First(a => !a.Hidden).Name;
+                var target = controller.State.Apps.First(a => !a.Hidden && a.IsAvailable).Name;
                 for (var cycle = 0; cycle < 100; cycle++)
                 {
                     window.Navigate("Launchpad");

@@ -13,6 +13,7 @@ internal sealed class DockPlate : FrameworkElement
     public Color Accent { get; set; }
     public bool Dark { get; set; }
     public bool Vertical { get; set; }
+    public bool OutwardEnd { get; set; } = true;
 
     public DockPlate() { IsHitTestVisible = false; }
 
@@ -52,17 +53,23 @@ internal sealed class DockPlate : FrameworkElement
             return;
         }
         var edge = new LinearGradientBrush { StartPoint = new Point(.12, 0), EndPoint = new Point(.8, 1) };
-        edge.GradientStops.Add(new GradientStop(Color.FromArgb(Dark ? (byte)155 : (byte)238, 255, 255, 255), 0));
+        edge.GradientStops.Add(new GradientStop(Color.FromArgb(Dark ? (byte)132 : (byte)210, 255, 255, 255), 0));
         edge.GradientStops.Add(new GradientStop(Color.FromArgb(35, 255, 255, 255), .4));
         edge.GradientStops.Add(new GradientStop(Color.FromArgb(12, 255, 255, 255), .64));
         edge.GradientStops.Add(new GradientStop(Color.FromArgb(92, 255, 255, 255), 1)); edge.Freeze();
-        dc.DrawGeometry(null, new Pen(edge, 1), contour);
+        dc.DrawGeometry(null, new Pen(edge, .85), contour);
         var inner = Contour(RenderSize, Shape, Radius, 2);
         dc.DrawGeometry(null, new Pen(new SolidColorBrush(Color.FromArgb(Dark ? (byte)18 : (byte)50, 255, 255, 255)), .65), inner);
-        var tint = new LinearGradientBrush { StartPoint = new Point(0, 0), EndPoint = new Point(0, 1) };
-        tint.GradientStops.Add(new GradientStop(Color.FromArgb(12, 255, 255, 255), 0));
-        tint.GradientStops.Add(new GradientStop(Colors.Transparent, .45));
-        tint.GradientStops.Add(new GradientStop(Color.FromArgb(10, Accent.R, Accent.G, Accent.B), 1)); tint.Freeze();
+        var tint = new LinearGradientBrush
+        {
+            StartPoint = Vertical ? new Point(OutwardEnd ? 0 : 1, 0) : new Point(0, OutwardEnd ? 0 : 1),
+            EndPoint = Vertical ? new Point(OutwardEnd ? 1 : 0, 0) : new Point(0, OutwardEnd ? 1 : 0)
+        };
+        tint.GradientStops.Add(new GradientStop(Color.FromArgb(7, 255, 255, 255), 0));
+        tint.GradientStops.Add(new GradientStop(Colors.Transparent, .48));
+        // A shallow, clear shelf catches the actual icon mirrors without a blur pass.
+        tint.GradientStops.Add(new GradientStop(Color.FromArgb(Dark ? (byte)7 : (byte)15, 255, 255, 255), .76));
+        tint.GradientStops.Add(new GradientStop(Color.FromArgb(Dark ? (byte)18 : (byte)28, Accent.R, Accent.G, Accent.B), 1)); tint.Freeze();
         dc.DrawGeometry(tint, null, contour);
         // The slim signature inlay gives the rail a distinct, architectural silhouette.
         var length = Shape == "Rail" ? Math.Min(74, (Vertical ? ActualHeight : ActualWidth) * .28) : 24;
