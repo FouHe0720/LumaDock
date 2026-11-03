@@ -194,10 +194,17 @@ internal static class Program
             using var watcher = service.CreateWatcher(); using var changed = new ManualResetEventSlim(); watcher.Changed += (_, _) => changed.Set();
             File.WriteAllText(Path.Combine(common, "watch-common.txt"), "Owned common watch fixture"); Require(changed.Wait(TimeSpan.FromSeconds(5)));
         });
-        Check("Nested content changes do not trigger a top-level snapshot refresh", () =>
+        Check("Changes within existing nested files are not recursively watched", () =>
         {
-            using var watcher = service.CreateWatcher(); using var changed = new ManualResetEventSlim(); watcher.Changed += (_, _) => changed.Set();
-            File.WriteAllText(Path.Combine(folder, "watch-nested.txt"), "Owned nested watch fixture"); Require(!changed.Wait(TimeSpan.FromMilliseconds(500)));
+            // Adding a child may legitimately change its parent directory's own
+            // LastWrite metadata, which is a top-level event. Isolate this watch
+            // and modify an existing nested file instead of testing that metadata.
+            var watchRoot = Directory.CreateDirectory(Path.Combine(root, "isolated-nested-watch")).FullName;
+            var child = Directory.CreateDirectory(Path.Combine(watchRoot, "child")).FullName;
+            var nestedFile = Path.Combine(child, "existing.txt"); File.WriteAllText(nestedFile, "Owned nested watch fixture");
+            using var watcher = new DesktopFileService(watchRoot, "").CreateWatcher();
+            using var changed = new ManualResetEventSlim(); watcher.Changed += (_, _) => changed.Set();
+            File.AppendAllText(nestedFile, " modified"); Require(!changed.Wait(TimeSpan.FromMilliseconds(500)));
         });
         Check("Disposal releases the watch and suppresses callbacks from subsequent changes", () =>
         {
