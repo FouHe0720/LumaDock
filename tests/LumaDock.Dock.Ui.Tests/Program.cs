@@ -12,6 +12,7 @@ using System.Windows.Threading;
 using LumaDock.App;
 using LumaDock.Core;
 using LumaDock.Storage;
+using LumaDock.Windows;
 
 namespace LumaDock.Dock.Ui.Tests;
 
@@ -65,6 +66,8 @@ internal static class Program
                     Require(buttons.Select(System.Windows.Automation.AutomationProperties.GetName).SequenceEqual(new[] { "应用" }.Concat(controller.State.Apps.Select(a => a.Name))), "Dock accessibility names do not match records.");
                 });
                 Check("Dock hover is dormant at rest", () => Require(!Field<DispatcherTimer>(dock, "hover").IsEnabled, "Hover timer is running without input."));
+                Check("Pinned records without live windows never display a running marker", () =>
+                    Require(Tiles(dock).All(tile => Field<Border>(tile, "Dot").Opacity == 0), "A saved pin was presented as running without a real window."));
                 Check("Icon color enhancement preserves the original at zero or an invalid amount", () =>
                 {
                     var source = ColorSample();
@@ -143,6 +146,19 @@ internal static class Program
                     Require(ReferenceEquals(source, strong.GetType().GetProperty("Source")!.GetValue(strong)), "The stronger mirror copied or substituted the real source.");
                     var shelf = (Rect)strong.GetType().GetProperty("ShelfBounds", Private)!.GetValue(strong)!;
                     Require(shelf.Height > 24 && shelf.Height <= 28, "The mirror did not gain its bounded depth.");
+                });
+                Check("The 95 percent mirror setting is stronger than 85 percent and remains bounded", () =>
+                {
+                    var source = ColorIcon(); var prior = CreateReflection("Bottom", .85); var current = CreateReflection("Bottom", .95); var capped = CreateReflection("Bottom", 4);
+                    foreach (var reflection in new[] { prior, current, capped }) SetReflectionSource(reflection, source);
+                    static int Alpha(byte[] pixels) => pixels.Where((_, index) => index % 4 == 3).Sum(value => (int)value);
+                    Require(Alpha(RenderPixels(current)) > Alpha(RenderPixels(prior)) * 1.08, "The stronger reflection still clamps to 85 percent.");
+                    Require(RenderPixels(current).SequenceEqual(RenderPixels(capped)), "The reflection upper bound was not retained.");
+                    foreach (var amount in new[] { double.NaN, double.PositiveInfinity, -1 })
+                    {
+                        var invalid = CreateReflection("Bottom", amount); SetReflectionSource(invalid, source);
+                        Require(RenderPixels(invalid).All(value => value == 0), "An invalid reflection amount painted content.");
+                    }
                 });
                 Check("Missing or disabled reflection paints no invented fallback", () =>
                 {
@@ -372,7 +388,7 @@ internal static class Program
                     {
                         CheckBounds(dock);
                         CheckReflectionBounds(dock);
-                        Require(Field<ScaleTransform>(Tiles(dock)[4], "Scale").ScaleX > 1.79, "Maximum hover scale was not applied.");
+                        Require(Field<ScaleTransform>(Tiles(dock)[4], "Scale").ScaleX > 1.89, "Maximum hover scale was not applied.");
                         Require(Field<ScaleTransform>(Tiles(dock)[3], "Scale").ScaleX > 1.1, "Neighbouring icons did not respond.");
                         Require(!Field<DispatcherTimer>(dock, "hover").IsEnabled, "Maximum hover did not settle.");
                         var target = Tiles(dock)[4]; var visual = Field<FrameworkElement>(target, "Visual");
@@ -495,6 +511,8 @@ internal static class Program
         using var controller = new AppController(Path.Combine(profile, "window-layers"), null);
         controller.State.Settings.AutoHide = false;
         controller.State.Settings.Animations = false;
+        var ownedApp = new AppEntry { Id = "owned-marker", Name = "Owned marker fixture", LaunchPath = Environment.ProcessPath!, ExecutablePath = Environment.ProcessPath!, Source = "Manual" };
+        controller.State.Apps = [ownedApp]; controller.State.PinnedIds = [ownedApp.Id];
         var dock = new DockWindow(controller) { ShowActivated = false };
         var cover = new Window
         {
@@ -512,6 +530,16 @@ internal static class Program
             cover.Left = dock.Left + 15; cover.Top = dock.Top + 15;
             cover.Show(); await Frame();
             var coverHandle = new WindowInteropHelper(cover).Handle;
+            var windowsField = typeof(WindowTracker).GetField("_windows", Private)!;
+            windowsField.SetValue(controller.Tracker, new RunningWindow[] { new(coverHandle, cover.Title, Environment.ProcessPath!, "", (uint)Environment.ProcessId) });
+            dock.RefreshWindows(); await Frame();
+            Check("A real owned HWND produces a clear running capsule without an animation clock", () =>
+            {
+                var marker = Field<Border>(Tiles(dock)[1], "Dot");
+                Require(marker.Opacity == 1 && marker.Width >= 17 && marker.Height == 6, "The running capsule is missing or still a tiny dot.");
+                Require(!marker.IsHitTestVisible && !marker.HasAnimatedProperties && marker.Effect == null, "The marker creates an input surface, animation or expensive effect.");
+                Require(Contrast(((SolidColorBrush)((Border)marker.Child).Background).Color, ((SolidColorBrush)marker.Background).Color) >= 3, "The running marker lacks contrast against its own backing.");
+            });
             if (interactiveLayerCheck && GetForegroundWindow() != coverHandle)
             {
                 var activated = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -544,6 +572,17 @@ internal static class Program
                         Require(GetForegroundWindow() == coverHandle, "Relayout stole keyboard focus.");
                     }
                 });
+                Check(position + " running capsule stays readable, bounded and reflects real foreground state", () =>
+                {
+                    var marker = Field<Border>(Tiles(dock)[1], "Dot");
+                    var active = controller.Tracker.IsActive(ownedApp);
+                    var length = active ? 24d : 17d;
+                    Require(marker.Opacity == 1 && (position is "Left" or "Right" ? marker.Height == length && marker.Width == 6 : marker.Width == length && marker.Height == 6), "The marker direction or foreground length is wrong.");
+                    Require(System.Windows.Automation.AutomationProperties.GetItemStatus(Field<Button>(Tiles(dock)[1], "Button")) == (active ? "当前窗口" : "正在运行"), "Accessible running status is not based on the actual window.");
+                    var bounds = marker.TransformToAncestor(dock).TransformBounds(new Rect(marker.RenderSize));
+                    Require(bounds.Left >= 0 && bounds.Top >= 0 && bounds.Right <= dock.ActualWidth && bounds.Bottom <= dock.ActualHeight, "The marker was clipped by the Dock window.");
+                    Require(Contrast(((SolidColorBrush)((Border)marker.Child).Background).Color, ((SolidColorBrush)marker.Background).Color) >= 3, "The marker lost its contrast backing.");
+                });
             }
             dock.RefreshWindows(); await Frame();
             Check("Refreshing application state does not raise the Dock or take focus", () =>
@@ -568,12 +607,22 @@ internal static class Program
                 if (fixtureIsForeground) Require(IsAbove(coverHandle, dockHandle) && GetForegroundWindow() == coverHandle,
                     "Restoring the normal layer covered the foreground window or took focus.");
             });
+            windowsField.SetValue(controller.Tracker, new RunningWindow[] { new(coverHandle, cover.Title, Environment.ProcessPath!, "", (uint)Environment.ProcessId + 1) });
+            dock.RefreshWindows(); await Frame();
+            Check("A stale HWND and process identity clears the capsule instead of inventing running state", () =>
+                Require(Field<Border>(Tiles(dock)[1], "Dot").Opacity == 0, "A stale process identity still displays as running."));
             dock.Close(); await Frame();
             Check("The layer-only update adds no clock that survives closing", () =>
                 Require(!Field<DispatcherTimer>(dock, "hover").IsEnabled && !Field<DispatcherTimer>(dock, "hideDelay").IsEnabled,
                     "Closing the normal-layer Dock retained a timer."));
         }
         finally { cover.Close(); if (dock.IsVisible) dock.Close(); await Frame(); }
+    }
+    private static double Contrast(Color first, Color second)
+    {
+        static double Linear(byte channel) { var value = channel / 255d; return value <= .04045 ? value / 12.92 : Math.Pow((value + .055) / 1.055, 2.4); }
+        static double Light(Color color) => .2126 * Linear(color.R) + .7152 * Linear(color.G) + .0722 * Linear(color.B);
+        var a = Light(first); var b = Light(second); return (Math.Max(a, b) + .05) / (Math.Min(a, b) + .05);
     }
     private static bool IsTopmost(IntPtr handle) => (GetWindowLongPtr(handle, -20).ToInt64() & 8) != 0;
     private static bool IsAbove(IntPtr upper, IntPtr lower)

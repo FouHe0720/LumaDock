@@ -25,7 +25,7 @@
       <path d="M24 89V76C24 43 42 24 77 24H156" fill="none" stroke="#e7fff9" stroke-opacity=".45" stroke-width="2" stroke-linecap="round"/>
     </g>
     <text x="174" y="132" font-family="Segoe UI Variable Display, Segoe UI, sans-serif" font-size="68" font-weight="600" letter-spacing="-2" fill="#edf8f6">LumaDock</text>
-    <text x="82" y="209" font-family="Segoe UI, Microsoft YaHei UI, sans-serif" font-size="22" letter-spacing="2" fill="#c2d9dc">Dock · 应用库 · 快捷控制</text>
+    <text x="82" y="209" font-family="Segoe UI, Microsoft YaHei UI, sans-serif" font-size="22" letter-spacing="2" fill="#c2d9dc">Dock · 应用库 · 桌面集</text>
     <path d="M82 256h40" stroke="#97d6c4" stroke-width="3" stroke-linecap="round"/>
     <text x="139" y="262" font-family="Segoe UI, sans-serif" font-size="15" letter-spacing="2" fill="#a3bfc4">NATIVE WINDOWS DESKTOP</text>
   </g>

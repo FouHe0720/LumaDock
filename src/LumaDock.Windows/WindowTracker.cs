@@ -1,12 +1,7 @@
 using System.Diagnostics;
 using System.IO;
-using System.Collections.Concurrent;
 using System.Runtime.InteropServices;
 using System.Text;
-using System.Windows;
-using System.Windows.Interop;
-using System.Windows.Media;
-using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using LumaDock.Core;
 
@@ -17,16 +12,12 @@ public sealed record RunningWindow(IntPtr Handle, string Title, string Executabl
 /// <summary>Real, switchable top-level windows, refreshed from WinEvents only. No process polling.</summary>
 public sealed class WindowTracker : IDisposable
 {
-    private static readonly ConcurrentDictionary<int, BitmapSource> GenericIcons = new();
-    // These executables can host unrelated applications. A shortcut's arguments
-    // do not identify which of the host's windows is being displayed.
     private static readonly HashSet<string> AmbiguousHosts = new(StringComparer.OrdinalIgnoreCase)
     {
         "explorer.exe", "applicationframehost.exe", "rundll32.exe", "dllhost.exe", "svchost.exe",
         "cmd.exe", "powershell.exe", "pwsh.exe", "java.exe", "javaw.exe", "python.exe", "pythonw.exe",
         "wscript.exe", "cscript.exe", "msiexec.exe", "wwahost.exe", "runtimebroker.exe", "mmc.exe",
-        "dotnet.exe", "electron.exe", "msedge.exe", "chrome.exe", "firefox.exe", "brave.exe",
-        "opera.exe", "vivaldi.exe", "iexplore.exe", "browser.exe", "arc.exe"
+        "dotnet.exe", "electron.exe", "msedge.exe", "chrome.exe", "firefox.exe", "brave.exe", "opera.exe", "vivaldi.exe"
     };
     private readonly List<IntPtr> _hooks = [];
     private readonly WinEventCallback _callback;
@@ -38,8 +29,6 @@ public sealed class WindowTracker : IDisposable
     private int _identityRefreshNeeded;
     public event EventHandler? Changed;
     public IReadOnlyList<RunningWindow> Windows => _windows;
-    public IntPtr ForegroundWindow => _disposed ? IntPtr.Zero : GetForegroundWindow();
-    public bool IsDesktopForeground => !_disposed && IsDesktopSurface(GetForegroundWindow());
 
     public WindowTracker()
     {
@@ -101,13 +90,7 @@ public sealed class WindowTracker : IDisposable
         EnumWindows((hwnd, _) =>
         {
             if (!IsWindowVisible(hwnd) || GetWindowTextLength(hwnd) == 0 || GetAncestor(hwnd, 2) != hwnd) return true;
-            var style = GetWindowLongPtr(hwnd, -20).ToInt64();
-            if ((style & (0x80 | 0x08000000)) != 0) return true; // Tool and non-activating helper surfaces.
-            if (IsShellSurface(hwnd)) return true;
-            // Owned dialogs belong to the owner's taskbar group, unless they explicitly
-            // request their own application button. Switching the owner lets Windows
-            // activate its current modal dialog rather than creating duplicate entries.
-            if (GetWindow(hwnd, 4) != IntPtr.Zero && (style & 0x40000) == 0) return true;
+            if ((GetWindowLongPtr(hwnd, -20).ToInt64() & 0x80) != 0) return true;
             if (DwmGetWindowAttribute(hwnd, 14, out int cloaked, sizeof(int)) == 0 && cloaked != 0) return true;
             GetWindowThreadProcessId(hwnd, out var pid);
             if (pid == Environment.ProcessId || pid == 0) return true;
@@ -128,140 +111,41 @@ public sealed class WindowTracker : IDisposable
             if (string.IsNullOrEmpty(aumid)) aumid = info.Aumid;
             var title = new StringBuilder(GetWindowTextLength(hwnd) + 1);
             GetWindowText(hwnd, title, title.Capacity);
-            if (!string.IsNullOrWhiteSpace(title.ToString()))
-                result.Add(new RunningWindow(hwnd, title.ToString(), info.Path, aumid, pid));
+            result.Add(new RunningWindow(hwnd, title.ToString(), info.Path, aumid, pid));
             return true;
         }, IntPtr.Zero);
-        _windows = result.AsReadOnly();
+        _windows = result;
         Changed?.Invoke(this, EventArgs.Empty);
     }
 
-    public bool IsRunning(AppEntry entry) => _windows.Any(window => Matches(entry, window));
-    public IReadOnlyList<RunningWindow> GetWindows(AppEntry entry) => _disposed
-        ? Array.Empty<RunningWindow>() : _windows.Where(window => Matches(entry, window)).ToArray();
-
+    public bool IsRunning(AppEntry entry) => _windows.Any(window => Matches(entry, window) && IsCurrent(window));
+    public bool IsActive(AppEntry entry)
+    {
+        var foreground = GetForegroundWindow();
+        return _windows.Any(window => window.Handle == foreground && Matches(entry, window) && IsCurrent(window));
+    }
+    private static bool IsCurrent(RunningWindow window) => IsWindow(window.Handle)
+        && GetWindowThreadProcessId(window.Handle, out var pid) != 0 && pid == window.ProcessId;
     public bool Activate(AppEntry entry)
     {
-        var candidates = _windows.Where(window => Matches(entry, window) && IsCurrentWindow(window)).ToList();
+        var candidates = _windows.Where(window => Matches(entry, window) && IsCurrent(window)).ToList();
         if (candidates.Count == 0) return false;
         var foreground = GetForegroundWindow();
         var currentIndex = candidates.FindIndex(w => w.Handle == foreground);
-        return ActivateWindow(candidates[(currentIndex + 1) % candidates.Count]);
-    }
-
-    /// <summary>Request normal activation; Windows foreground and privilege rules still apply.</summary>
-    public bool ActivateWindow(RunningWindow window)
-    {
-        if (_disposed || !IsCurrentWindow(window)) return false;
-        if (IsIconic(window.Handle)) ShowWindowAsync(window.Handle, 9);
-        var target = window.Handle;
-        var popup = GetLastActivePopup(target);
-        if (popup != IntPtr.Zero && popup != target && IsWindowVisible(popup))
-        {
-            GetWindowThreadProcessId(popup, out var owner);
-            if (owner == window.ProcessId) target = popup;
-        }
+        var target = candidates[(currentIndex + 1) % candidates.Count].Handle;
+        if (IsIconic(target)) ShowWindowAsync(target, 9);
         return SetForegroundWindow(target);
-    }
-
-    public bool MinimizeWindow(RunningWindow window) => !_disposed && IsCurrentWindow(window)
-        && ShowWindowAsync(window.Handle, 6);
-
-    /// <summary>Asks the target to close normally; no process termination or forced timeout.</summary>
-    public bool CloseWindow(RunningWindow window) => !_disposed && IsCurrentWindow(window)
-        && PostMessage(window.Handle, 0x0010, IntPtr.Zero, IntPtr.Zero);
-
-    private static bool IsCurrentWindow(RunningWindow window)
-    {
-        if (window.Handle == IntPtr.Zero || window.ProcessId == 0 || !IsWindow(window.Handle) || IsShellSurface(window.Handle)) return false;
-        GetWindowThreadProcessId(window.Handle, out var owner);
-        return owner == window.ProcessId;
-    }
-
-    /// <summary>Reads a current caption only when it is needed by a window menu.
-    /// It never refreshes process identity or adds a title-change event subscription.</summary>
-    public static string ReadWindowTitle(RunningWindow window)
-    {
-        if (!IsCurrentWindow(window)) return "已关闭窗口";
-        var length = Math.Clamp(GetWindowTextLength(window.Handle), 0, 32767);
-        var title = new StringBuilder(length + 1);
-        if (GetWindowText(window.Handle, title, title.Capacity) > 0 && !string.IsNullOrWhiteSpace(title.ToString()))
-            return title.ToString();
-        return string.IsNullOrWhiteSpace(window.Title) ? "未命名窗口" : window.Title;
-    }
-
-    /// <summary>Only Explorer's desktop and native taskbar surfaces are desktop.
-    /// A normal File Explorer folder window remains an application window.</summary>
-    public static bool IsDesktopSurface(IntPtr window)
-    {
-        if (window == IntPtr.Zero || !IsWindow(window)) return false;
-        var className = new StringBuilder(128);
-        GetClassName(window, className, className.Capacity);
-        return className.ToString() is "Progman" or "WorkerW" or "Shell_TrayWnd" or "Shell_SecondaryTrayWnd";
     }
 
     public static bool Matches(AppEntry entry, RunningWindow window)
     {
         if (!string.IsNullOrWhiteSpace(entry.AppUserModelId) && string.Equals(entry.AppUserModelId, window.AppUserModelId, StringComparison.OrdinalIgnoreCase)) return true;
-        // Both packaged and ordinary desktop identities can share an executable.
-        // A conflicting explicit identity must never fall back to the host's path.
         if (!string.IsNullOrWhiteSpace(entry.AppUserModelId) && !string.IsNullOrWhiteSpace(window.AppUserModelId)) return false;
         var executable = !string.IsNullOrWhiteSpace(entry.ExecutablePath) ? entry.ExecutablePath : entry.LaunchPath;
         if (string.IsNullOrEmpty(executable) || !executable.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)) return false;
-        // Without an exact AUMID, profiles, PWA URLs, documents and runtime scripts
-        // cannot be attributed reliably merely because their host executable matches.
+        // Parameters do not identify a browser profile, document or script's particular host window.
         if (!string.IsNullOrWhiteSpace(entry.Arguments) && AmbiguousHosts.Contains(Path.GetFileName(executable))) return false;
         return string.Equals(Environment.ExpandEnvironmentVariables(executable), window.ExecutablePath, StringComparison.OrdinalIgnoreCase);
-    }
-
-    /// <summary>Copies a borrowed window icon to a frozen WPF source. It never owns or destroys the HICON.</summary>
-    public static BitmapSource? GetWindowIcon(RunningWindow window, int pixels = 64)
-    {
-        if (!IsCurrentWindow(window)) return null;
-        pixels = Math.Clamp(pixels, 16, 256);
-        try
-        {
-            IntPtr icon = IntPtr.Zero;
-            foreach (var size in new[] { pixels > 24 ? 1 : 2, 0, 1 })
-            {
-                // One 100 ms deadline for an unresponsive process. Do not continue to
-                // subsequent WM_GETICON variants when the first request timed out.
-                if (SendMessageTimeout(window.Handle, 0x007F, new IntPtr(size), IntPtr.Zero, 0x0002, 100, out var result) == IntPtr.Zero) break;
-                icon = new IntPtr(unchecked((long)result.ToUInt64()));
-                if (icon != IntPtr.Zero) break;
-            }
-            if (icon == IntPtr.Zero) icon = GetClassLongPtr(window.Handle, pixels > 24 ? -14 : -34);
-            if (icon == IntPtr.Zero) icon = GetClassLongPtr(window.Handle, -14);
-            if (icon == IntPtr.Zero || !IsCurrentWindow(window)) return null;
-            var bitmap = Imaging.CreateBitmapSourceFromHIcon(icon, Int32Rect.Empty, BitmapSizeOptions.FromWidthAndHeight(pixels, pixels));
-            bitmap.Freeze(); return bitmap;
-        }
-        catch (Exception error) when (error is ArgumentException or InvalidOperationException or ExternalException)
-        { Debug.WriteLine(error.Message); return null; }
-    }
-
-    /// <summary>The Windows shared default application icon, explicitly used as an unidentified-icon fallback.</summary>
-    public static BitmapSource? GetGenericWindowIcon(int pixels = 64)
-    {
-        var size = Math.Clamp((int)Math.Ceiling(Math.Clamp(pixels, 16, 256) / 16d) * 16, 16, 256);
-        if (GenericIcons.TryGetValue(size, out var cached)) return cached;
-        try
-        {
-            var icon = LoadIcon(IntPtr.Zero, new IntPtr(32512));
-            if (icon == IntPtr.Zero) return null;
-            var image = Imaging.CreateBitmapSourceFromHIcon(icon, Int32Rect.Empty, BitmapSizeOptions.FromWidthAndHeight(size, size));
-            image.Freeze(); return GenericIcons.GetOrAdd(size, image);
-        }
-        catch (Exception error) when (error is ArgumentException or InvalidOperationException or ExternalException)
-        { Debug.WriteLine(error.Message); return null; }
-    }
-
-    private static bool IsShellSurface(IntPtr hwnd)
-    {
-        var className = new StringBuilder(128);
-        GetClassName(hwnd, className, className.Capacity);
-        return className.ToString() is "Progman" or "WorkerW" or "Shell_TrayWnd" or "Shell_SecondaryTrayWnd"
-            or "NotifyIconOverflowWindow" or "Shell_InputSwitchTopLevelWindow" or "TaskListThumbnailWnd";
     }
 
     public bool IsForegroundFullscreen
@@ -369,8 +253,6 @@ public sealed class WindowTracker : IDisposable
     [DllImport("user32.dll")] private static extern bool IsIconic(IntPtr hwnd);
     [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint pid);
     [DllImport("user32.dll")] private static extern IntPtr GetAncestor(IntPtr hwnd, uint flags);
-    [DllImport("user32.dll")] private static extern IntPtr GetWindow(IntPtr hwnd, uint command);
-    [DllImport("user32.dll")] private static extern IntPtr GetLastActivePopup(IntPtr hwnd);
     [DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")] private static extern IntPtr GetWindowLongPtr(IntPtr hwnd, int index);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetWindowTextLength(IntPtr hwnd);
     [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetWindowText(IntPtr hwnd, StringBuilder text, int max);
@@ -378,10 +260,6 @@ public sealed class WindowTracker : IDisposable
     [DllImport("user32.dll")] private static extern IntPtr GetForegroundWindow();
     [DllImport("user32.dll")] private static extern bool SetForegroundWindow(IntPtr hwnd);
     [DllImport("user32.dll")] private static extern bool ShowWindowAsync(IntPtr hwnd, int command);
-    [DllImport("user32.dll", SetLastError = true)] private static extern bool PostMessage(IntPtr hwnd, uint message, IntPtr wParam, IntPtr lParam);
-    [DllImport("user32.dll", SetLastError = true)] private static extern IntPtr SendMessageTimeout(IntPtr hwnd, uint message, IntPtr wParam, IntPtr lParam, uint flags, uint milliseconds, out UIntPtr result);
-    [DllImport("user32.dll", EntryPoint = "GetClassLongPtrW")] private static extern IntPtr GetClassLongPtr(IntPtr hwnd, int index);
-    [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern IntPtr LoadIcon(IntPtr instance, IntPtr name);
     [DllImport("user32.dll")] private static extern bool GetWindowRect(IntPtr hwnd, out Rect rect);
     [DllImport("user32.dll")] private static extern IntPtr MonitorFromWindow(IntPtr hwnd, uint flags);
     [DllImport("user32.dll")] private static extern bool GetMonitorInfo(IntPtr monitor, ref MonitorNative info);

@@ -20,7 +20,7 @@ public static class AppGridLayout
 
         var lineHeight = Math.Ceiling(Math.Max(fontSize * fontLineSpacing, fontSize * 1.2));
         var nameHeight = lineHeight * 2 + 2;
-        var tileHeight = 48 + 10 + nameHeight + 8 + 18;
+        var tileHeight = 48 + 10 + nameHeight + 8 + 12;
         var minCellWidth = Math.Max(112, fontSize * 6.8);
         var columns = (int)Math.Clamp(Math.Floor(width / minCellWidth), 1, Math.Clamp(requestedColumns, 1, 10));
         var rows = (int)Math.Clamp(Math.Floor(height / (tileHeight + 10)), 1, 4);

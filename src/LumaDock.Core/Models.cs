@@ -26,7 +26,7 @@ public sealed class DockSettings
     public double Opacity { get; set; } = .70;
     public int DockMaterialVersion { get; set; }
     public bool IconReflection { get; set; } = true;
-    public double ReflectionStrength { get; set; } = .24;
+    public double ReflectionStrength { get; set; } = .50;
     public double DockIconVibrancy { get; set; } = .28;
     public bool LiquidGlass { get; set; } = true;
     public bool LiveGlass { get; set; } = true;
@@ -42,12 +42,7 @@ public sealed class DockSettings
     public string DockShape { get; set; } = "Capsule";
     public string Position { get; set; } = "Bottom";
     public bool AutoHide { get; set; }
-    public bool DockSystemEnabled { get; set; } = true;
-    public bool ShowRunningApps { get; set; } = true;
-    public double DockStatusIconSize { get; set; } = 16;
-    public double DockStatusFontSize { get; set; } = 12;
-    public int DockStatusFontWeight { get; set; } = 600;
-    public double AnimationStrength { get; set; } = .45;
+    public double AnimationStrength { get; set; } = .62;
     public bool Animations { get; set; } = true;
     public bool PowerSaver { get; set; }
     public string MonitorDevice { get; set; } = "";

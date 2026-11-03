@@ -44,9 +44,6 @@ jobs:
       - name: Test application and storage contracts
         run: ./scripts/test.ps1
 
-      - name: Test deterministic running-window projection
-        run: dotnet run --project tests/LumaDock.Running.Tests -c Release -- --report artifacts/tests/running-results.json
-
       - name: Test liquid lens pixels
         run: ./scripts/test-lens.ps1
 

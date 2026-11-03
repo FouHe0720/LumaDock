@@ -34,6 +34,26 @@ internal static class Program
         }
         static void Require(bool condition) { if (!condition) throw new InvalidOperationException("Integration check did not meet its documented condition."); }
 
+        Check("Running indicators never fall back through conflicting explicit application identities", () =>
+        {
+            var app = new AppEntry { AppUserModelId = "Fixture!A", ExecutablePath = @"C:\Fixture\host.exe" };
+            Require(!WindowTracker.Matches(app, new(new IntPtr(1), "Fixture", app.ExecutablePath, "Fixture!B", 42)));
+            Require(WindowTracker.Matches(app, new(new IntPtr(1), "Fixture", @"C:\Other\host.exe", "fixture!a", 42)));
+        });
+        Check("Parameterized browser profiles do not receive an unverified host running indicator", () =>
+        {
+            var app = new AppEntry { ExecutablePath = @"C:\Fixture\msedge.exe", Arguments = "--profile-directory=Private" };
+            var window = new RunningWindow(new IntPtr(1), "Fixture", app.ExecutablePath, "", 42);
+            Require(!WindowTracker.Matches(app, window)); app.Arguments = ""; Require(WindowTracker.Matches(app, window));
+        });
+        Check("Unavailable window handles cannot produce running or active state", () =>
+        {
+            using var tracker = new WindowTracker();
+            typeof(WindowTracker).GetField("_windows", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!.SetValue(tracker,
+                new RunningWindow[] { new(IntPtr.Zero, "Fixture", @"C:\Fixture\editor.exe", "", (uint)Environment.ProcessId) });
+            var app = new AppEntry { ExecutablePath = @"C:\Fixture\editor.exe" }; Require(!tracker.IsRunning(app) && !tracker.IsActive(app));
+        });
+
         Check("Shell discovery returns real named launch records with unique stable identities", () =>
         {
             snapshot = AppDiscovery.ScanSnapshot(); apps = snapshot.Entries.ToList();
@@ -243,8 +263,6 @@ internal static class Program
             }
         });
 
-        WindowActionChecks.Run(Check, Require);
-
         var failed = results.Count(result => !result.Passed);
         var reportIndex = Array.IndexOf(args, "--report");
         var reportPath = reportIndex >= 0 && reportIndex + 1 < args.Length ? args[reportIndex + 1] :
@@ -256,7 +274,6 @@ internal static class Program
             recordedAtUtc = DateTimeOffset.UtcNow,
             platform = "Windows x64 interactive session",
             readOnlySystemChecks = true,
-            windowActionsUseOwnedFixturesOnly = true,
             shortcutChecksUsePrivateFixtureDirectory = true,
             elapsedMs = total.Elapsed.TotalMilliseconds,
             passed = results.Count - failed,

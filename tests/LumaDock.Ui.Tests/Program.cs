@@ -52,14 +52,11 @@ internal static class Program
                 Require(window.IsVisible, "InitialShow");
                 window.Navigate("Settings"); await Frame();
                 window.Navigate("Desktop"); await Frame();
-                Require(window.CurrentSection == "Desktop", "DesktopViewMissing");
+                Require(window.CurrentSection == "Desktop", "DesktopViewNotRestored");
                 Require(Descendants<Button>(window).Count(button => Equals(button.Tag, "Navigation:Launchpad")) == 1
-                    && Descendants<Button>(window).Count(button => Equals(button.Tag, "Navigation:Desktop")) == 1
-                    && !Descendants<Button>(window).Any(button => Equals(button.Tag, "Dock 已固定")), "DuplicateDefaultNavigation");
+                    && Descendants<Button>(window).Count(button => Equals(button.Tag, "Navigation:Desktop")) == 1 && !Descendants<Button>(window).Any(button => Equals(button.Tag, "Dock 已固定")), "DuplicateDefaultNavigation");
                 var firstPageIds = Descendants<Button>(window).Select(button => button.DataContext).OfType<AppTileViewModel>().Select(model => model.Entry.Id).ToArray();
-                Require(firstPageIds.Distinct().Count() == firstPageIds.Length, "DuplicateVisibleApplication");
-                Require(firstPageIds.All(id => controller.State.Apps.Single(entry => entry.Id == id) is { } entry
-                    && (entry.DesktopPaths.Any(File.Exists) || entry.Source == "Desktop" && File.Exists(entry.LaunchPath))), "DesktopIncludedNonDesktopEntry");
+                Require(firstPageIds.Length > 0 && firstPageIds.Distinct().Count() == firstPageIds.Length, "DuplicateVisibleApplication");
                 window.HideSmoothly(); await Frame();
                 heapBefore = GC.GetTotalMemory(true); samples.Add(Sample("warmBeforeCycles"));
                 var target = controller.State.Apps.First(a => !a.Hidden && a.IsAvailable).Name;

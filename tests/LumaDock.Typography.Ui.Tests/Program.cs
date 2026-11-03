@@ -57,33 +57,23 @@ internal static class Program
                 window.SourceInitialized += (_, _) => EnableWindow(new WindowInteropHelper(window).Handle, false);
                 window.Show(); await Frame();
 
-                Test("A fresh collection separates library and desktop without automatic columns", () =>
+                Test("A fresh collection has library and desktop pages and no automatic columns", () =>
                 {
                     Require(controller.State.Categories.Count == 0, "Automatic categories returned in a fresh profile.");
                     var navigation = Descendants<TextBlock>(window).Where(text => Equals(text.Tag, "NavigationLabel")).Select(text => text.Text).ToArray();
-                    Require(navigation.SequenceEqual(new[] { "应用库", "桌面集", "偏好设置", "关于" }), "Library and desktop navigation did not render once each.");
+                    Require(navigation.SequenceEqual(new[] { "应用库", "桌面集", "偏好设置", "关于" }), "Duplicate desktop or library navigation remains.");
                     Require(!Descendants<Button>(window).Any(button => Equals(button.Tag, "Dock 已固定")), "A built-in pinned category remains.");
-                    Require(Descendants<TextBlock>(window).Single(text => Equals(text.Tag, "PageHeading")).Text == "应用库", "Library heading is missing.");
+                    Require(Descendants<TextBlock>(window).Single(text => Equals(text.Tag, "PageHeading")).Text == "应用库", "Unified heading is missing.");
                 });
                 var totalBeforeAlias = System.Windows.Automation.AutomationProperties.GetHelpText(Descendants<Button>(window).Single(button => Equals(button.Tag, "全部应用")));
                 var firstPageBeforeAlias = Descendants<Button>(window).Where(button => button.DataContext is AppTileViewModel).Select(button => ((AppTileViewModel)button.DataContext).Entry.Id).ToArray();
                 window.Navigate("Desktop"); await Frame();
-                Test("Desktop shows only real desktop shortcuts without changing the library", () =>
+                Test("Desktop navigation shows actual existing shortcut members and a matching count", () =>
                 {
-                    Require(window.CurrentSection == "Desktop", "Desktop navigation did not select its own view.");
-                    var visible = Descendants<Button>(window).Select(button => button.DataContext).OfType<AppTileViewModel>().Select(model => model.Entry).ToArray();
-                    Require(visible.Select(entry => entry.Id).Distinct().Count() == visible.Length, "Desktop duplicated an application.");
-                    Require(visible.All(entry => entry.DesktopPaths.Any(File.Exists) || entry.Source == "Desktop" && File.Exists(entry.LaunchPath)), "Desktop included a non-desktop launch record.");
-                    var expected = ApplicationPresentation.Group(controller.State.Apps).Count(group => group.Entries.Any(entry => !entry.Hidden && entry.IsAvailable
-                        && (entry.DesktopPaths.Any(File.Exists) || entry.Source == "Desktop" && File.Exists(entry.LaunchPath))));
-                    var all = Descendants<Button>(window).Single(button => Equals(button.Tag, "全部应用"));
-                    Require(System.Windows.Automation.AutomationProperties.GetHelpText(all) == $"{expected} 个应用", "Desktop count included apps without existing desktop shortcuts.");
-                });
-                window.Navigate("Launchpad"); await Frame();
-                Test("Returning to the library restores all discovered applications", () =>
-                {
-                    Require(System.Windows.Automation.AutomationProperties.GetHelpText(Descendants<Button>(window).Single(button => Equals(button.Tag, "全部应用"))) == totalBeforeAlias, "Desktop navigation changed the library total.");
-                    Require(firstPageBeforeAlias.SequenceEqual(Descendants<Button>(window).Where(button => button.DataContext is AppTileViewModel).Select(button => ((AppTileViewModel)button.DataContext).Entry.Id)), "Desktop navigation changed library ordering.");
+                    Require(window.CurrentSection == "Desktop", "Desktop view was not restored.");
+                    var expected = ApplicationPresentation.Group(controller.State.Apps).Count(group => group.Entries.Any(app => !app.Hidden && app.IsAvailable && (app.DesktopPaths.Any(File.Exists) || (app.Source == "Desktop" && File.Exists(app.LaunchPath)))));
+                    Require(System.Windows.Automation.AutomationProperties.GetHelpText(Descendants<Button>(window).Single(button => Equals(button.Tag, "全部应用"))) == $"{expected} 个应用", "Desktop count is not its actual shortcut subset.");
+                    Require(Descendants<Button>(window).Where(button => button.DataContext is AppTileViewModel).All(button => { var app = ((AppTileViewModel)button.DataContext).Entry; return app.DesktopPaths.Any(File.Exists) || app.Source == "Desktop" && File.Exists(app.LaunchPath); }), "Desktop contains a non-desktop card.");
                 });
                 var createColumn = typeof(ControlCenterWindow).GetMethod("TryCreateCategory", BindingFlags.Instance | BindingFlags.NonPublic)!;
                 var renameColumn = typeof(ControlCenterWindow).GetMethod("TryRenameCategory", BindingFlags.Instance | BindingFlags.NonPublic)!;
@@ -124,7 +114,7 @@ internal static class Program
                     Require(saved.Categories.Count == 0 && saved.Apps.Single(entry => entry.Id == groupedEntry.Id).Category.Length == 0, "Deleting a column left an assignment behind.");
                     Require(saved.Apps.Count == controller.State.Apps.Count && pinOrder.SequenceEqual(saved.PinnedIds), "Deleting a column removed an application or changed pins.");
                     Require(System.Windows.Automation.AutomationProperties.GetHelpText(Descendants<Button>(window).Single(button => Equals(button.Tag, "全部应用"))) == totalBeforeAlias, "Deleting a selected column did not restore all applications.");
-                    Require(Descendants<TextBlock>(window).Single(text => Equals(text.Tag, "PageHeading")).Text == "应用库", "Deleting a selected column did not restore the library heading.");
+                    Require(Descendants<TextBlock>(window).Single(text => Equals(text.Tag, "PageHeading")).Text == "应用库", "Deleting a selected column did not restore the master heading.");
                     Require(groupedSourceHash == null || FileHash(groupedEntry.LaunchPath).SequenceEqual(groupedSourceHash), "Column organization changed an original application or shortcut.");
                 });
                 Require((bool)createColumn.Invoke(window, ["个人栏目"])!, "An explicit personal column could not be created for typography coverage.");
@@ -330,10 +320,10 @@ internal static class Program
                 });
 
                 window.Navigate("Desktop"); await Frame();
-                var desktopSnapshot = Inspect(window, "manual-40-bold-desktop");
-                Test("Desktop shortcuts preserve application typography and adaptive layout", () =>
+                var desktopSnapshot = Inspect(window, "manual-40-bold-unified-legacy-entry");
+                Test("Desktop entries preserve the selected font and adaptive layout", () =>
                 {
-                    Require(desktopSnapshot.VisibleTileCount > 0 && window.CurrentSection == "Desktop", "Desktop entry did not use the desktop shortcut list.");
+                    Require(desktopSnapshot.VisibleTileCount > 0 && window.CurrentSection == "Desktop", "Desktop entry did not use the desktop collection.");
                     CheckManualFont(window, 40);
                     CheckLabelBounds(window);
                 });
@@ -360,25 +350,6 @@ internal static class Program
                 controller.State.Settings.NameFontItalic = true;
                 controller.ApplySettings(); window.Navigate("Settings"); await Frame();
                 window.Width = window.MinWidth; await Frame();
-                Test("System Dock preferences use real controls and save independently of application typography", () =>
-                {
-                    foreach (var title in new[] { "显示系统状态区", "显示正在运行的应用" })
-                    {
-                        var toggle = Descendants<CheckBox>(window).Single(check => System.Windows.Automation.AutomationProperties.GetName(check) == title);
-                        toggle.IsChecked = false; toggle.RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
-                    }
-                    foreach (var setting in new[] { ("状态图标大小", 22d), ("状态文字大小", 17d) })
-                    {
-                        var slider = Descendants<Slider>(window).Single(item => System.Windows.Automation.AutomationProperties.GetName(item) == setting.Item1);
-                        slider.Value = setting.Item2;
-                        slider.RaiseEvent(new MouseButtonEventArgs(Mouse.PrimaryDevice, Environment.TickCount, MouseButton.Left) { RoutedEvent = UIElement.PreviewMouseLeftButtonUpEvent });
-                    }
-                    var weight = Descendants<ComboBox>(window).Single(item => System.Windows.Automation.AutomationProperties.GetName(item) == "状态文字与图标粗细");
-                    weight.SelectedValue = "800";
-                    var saved = new StateStore(dataPath).Load().Settings;
-                    Require(!saved.DockSystemEnabled && !saved.ShowRunningApps && saved.DockStatusIconSize == 22 && saved.DockStatusFontSize == 17 && saved.DockStatusFontWeight == 800, "Actual status controls did not persist their values.");
-                    Require(!saved.FollowSystemIconFont && saved.NameFontSize == 18 && saved.NameFontItalic, "Status styling changed application name preferences.");
-                });
                 Test("All six palette controls fit at the minimum supported window width", () =>
                 {
                     var swatches = Descendants<Button>(window).Where(button => button.Tag is string tag && tag.StartsWith("Accent:")).ToArray();
@@ -398,8 +369,8 @@ internal static class Program
                     Require(!new StateStore(dataPath).Load().Settings.IconReflection, "The actual reflection toggle did not save.");
                     reflect.IsChecked = true; reflect.RaiseEvent(new RoutedEventArgs(System.Windows.Controls.Primitives.ButtonBase.ClickEvent));
                     var strength = Descendants<Slider>(window).Single(slider => System.Windows.Automation.AutomationProperties.GetName(slider) == "倒影强度");
-                    Require(Math.Abs(strength.Maximum - .85) < .001, "The expanded reflection strength is unavailable.");
-                    strength.Value = .72;
+                    Require(Math.Abs(strength.Maximum - .95) < .001, "The expanded reflection strength is unavailable.");
+                    strength.Value = .90;
                     strength.RaiseEvent(new MouseButtonEventArgs(Mouse.PrimaryDevice, Environment.TickCount, MouseButton.Left) { RoutedEvent = UIElement.PreviewMouseLeftButtonUpEvent });
                     var density = Descendants<Slider>(window).Single(slider => System.Windows.Automation.AutomationProperties.GetName(slider) == "Dock 浓度");
                     Require(Math.Abs(density.Minimum - .02) < .001, "The transparent range is still restricted to the old minimum.");
@@ -409,7 +380,7 @@ internal static class Program
                     vivid.Value = .50;
                     vivid.RaiseEvent(new MouseButtonEventArgs(Mouse.PrimaryDevice, Environment.TickCount, MouseButton.Left) { RoutedEvent = UIElement.PreviewMouseLeftButtonUpEvent });
                     var saved = new StateStore(dataPath).Load().Settings;
-                    Require(saved.IconReflection && Math.Abs(saved.ReflectionStrength - .72) < .001 && Math.Abs(saved.Opacity - .04) < .001 && Math.Abs(saved.DockIconVibrancy - .50) < .001, "Reflection strength, vibrancy or concentration did not persist through actual controls.");
+                    Require(saved.IconReflection && Math.Abs(saved.ReflectionStrength - .90) < .001 && Math.Abs(saved.Opacity - .04) < .001 && Math.Abs(saved.DockIconVibrancy - .50) < .001, "Reflection strength, vibrancy or concentration did not persist through actual controls.");
                     Require(Descendants<TextBlock>(window).Any(text => text.Text == "Windows 桌面图标"), "The original desktop icon recovery control is no longer reachable.");
                 });
                 foreach (var value in new[] { "Rose", "Graphite" })
@@ -560,7 +531,7 @@ internal static class Program
                     systemSettingsChanged = false, systemFontChanged = false, appLaunches = 0,
                     controllerStartCalled = false, nativeWindowsDisabledExceptOwnCaretContract = true,
                     nativeCaretChecks = NativeCaretChecks,
-                    interpretation = "Checks actual WPF labels, local preferences, separate library/desktop navigation, column controls/menus and persistence, native caret/root-clock lifecycle, counts and bounded motion using isolated data. Creation/rename values use the same actions called by their dialogs; text entry is programmatic. External IME composition is not tested. Font-change delivery uses local service injection. Windows typography and caret blink settings are not modified."
+                    interpretation = "Checks actual WPF labels, local preferences, unified navigation, column controls/menus and persistence, native caret/root-clock lifecycle, counts and bounded motion using isolated data. Creation/rename values use the same actions called by their dialogs; text entry is programmatic. External IME composition is not tested. Font-change delivery uses local service injection. Windows typography and caret blink settings are not modified."
                 };
                 Directory.CreateDirectory(Path.GetDirectoryName(reportPath)!);
                 File.WriteAllText(reportPath, JsonSerializer.Serialize(report, new JsonSerializerOptions { WriteIndented = true }));
@@ -599,10 +570,10 @@ internal static class Program
     private static void CheckInterfaceFont(ControlCenterWindow window, DesktopFontInfo font)
     {
         var navigation = Descendants<TextBlock>(window).Where(text => Equals(text.Tag, "NavigationLabel")).ToArray();
-        Require(navigation.Length >= 4 && navigation.Count(label => label.Text == "应用库") == 1 && navigation.Count(label => label.Text == "桌面集") == 1, "The library and desktop navigation labels were not rendered.");
+        Require(navigation.Length >= 3 && navigation.Count(label => label.Text == "应用库") == 1, "The unified navigation labels were not rendered.");
         foreach (var label in navigation)
         {
-            var expected = Equals(Ancestor<Button>(label)?.Tag, "Navigation:" + window.CurrentSection) ? Math.Max(600, font.Weight) : font.Weight;
+            var expected = Equals(Ancestor<Button>(label)?.Tag, "Navigation:Launchpad") ? Math.Max(600, font.Weight) : font.Weight;
             Require(label.FontWeight.ToOpenTypeWeight() == expected, "Navigation ignored the active font weight.");
             Require(label.FontFamily.Source == font.FamilyName, "Navigation ignored the active font family.");
             Require(label.FontSize <= 15 && label.ActualWidth < 110, "Name font size expanded or clipped the navigation.");

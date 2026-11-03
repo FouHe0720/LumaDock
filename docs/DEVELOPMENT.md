@@ -57,24 +57,29 @@ WSL 可用于编辑文件，但 Linux 构建结果不能代替 Windows WPF 编�
 | --- | --- | --- |
 | `scripts/test.ps1` | Core / Storage 契约与损坏恢复 | .NET SDK |
 | `scripts/test-lens.ps1` | 像素折射、柔化、边界和取消 | .NET SDK |
-| `scripts/test-layout.ps1` | 大字、自适应网格和边界输入 | .NET SDK |
+| `scripts/test-layout.ps1` | 三排网格、大字自适应、视口和边界输入 | .NET SDK |
 | `scripts/test-cadence.ps1` | 旧版采样节奏组件回归；实时模式不使用此策略 | .NET SDK |
 | `scripts/test-icon.ps1` | 真实图标、透明通道、自定义来源、缓存更新与回退 | Windows WPF / Shell |
 | `scripts/test-compositor-ui.ps1` | 实时合成、静态切换、已知背景变化与资源停止 | Windows 交互会话 |
 | `scripts/test-windows.ps1` | Shell、真实图标、显示器和窗口身份 | Windows 交互会话 |
 | `scripts/test-font.ps1` | 系统图标字体读取与释放 | Windows |
 | `scripts/test-typography-ui.ps1` | 实际 WPF 栏目字体、文字颜色、预览、导航与流光停止 | Windows 交互会话 |
-| `scripts/test-dock-ui.ps1` | Dock 四边与三轮廓、放大边界、命中、滚动与动画停止 | Windows 交互会话 |
+| `scripts/test-dock-ui.ps1` | Dock 四边与三轮廓、运行胶囊、放大边界、命中、滚动与动画停止 | Windows 交互会话 |
 | `scripts/test-ui.ps1` | 窗口循环、重建和开合回归 | Windows 交互会话 |
-| `dotnet run --project tests/LumaDock.Running.Tests -c Release` | 临时运行分组、固定去重、AUMID／共用宿主身份；仅确定性快照 | Windows |
-| `dotnet run --project tests/LumaDock.System.Tests -c Release` | 真实设备只读快照、系统动作替身、COM 释放 | Windows 交互会话 |
-| `dotnet run --project tests/LumaDock.System.Ui.Tests -c Release` | 真实系统区、快捷控制、月历、四边定位及重建 | Windows 交互会话 |
 | `scripts/test-activation.ps1` | 多进程单实例激活 | Windows |
 | `scripts/test-backdrop.ps1` | 原生背景属性与回退 | Windows 交互会话 |
 | `scripts/test-sampler.ps1` | 后方区域采样与资源释放 | Windows 交互会话 |
 | `scripts/test-wallpaper.ps1` | 壁纸元数据读取与刷新 | Windows |
 
 各脚本生成 JSON 报告至 `artifacts/tests`。交互测试不应与性能采样同时运行。测试计数、日期和边界见 [验证记录](validation.md)；不能把编译通过或短测通过写成所有硬件、游戏及长期驻留验收完成。
+
+0.10.3 的批量添加与管理窗口检查可单独运行：
+
+```powershell
+dotnet run --project tests/LumaDock.Importer.Ui.Tests -c Release -- --report artifacts/tests/importer-ui-results.json
+```
+
+此检查使用 Windows WPF、自有程序与快捷方式文件、隔离配置，覆盖逐项失败、重复、取消、重入、三排布局与添加后的可见结果。它不操作用户原始文件，也不将内部导入入口检查视为原生文件选择器的鼠标全流程。
 
 GitHub Actions 使用 Windows runner 构建整个解决方案，执行确定性的 Core/Storage、图像、布局与采样节奏组件测试，并生成便携包。CI 不执行真实交互桌面或性能验收，结果见 [Actions](https://github.com/FouHe0720/LumaDock/actions)。
 

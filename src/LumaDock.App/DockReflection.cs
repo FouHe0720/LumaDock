@@ -28,7 +28,7 @@ internal sealed class DockReflection : FrameworkElement
         vertical = position is "Left" or "Right"; outwardEnd = position is "Bottom" or "Right";
         Width = vertical ? cross : cell; Height = vertical ? cell : cross;
         center = cell / 2; resting = restingCenter; iconWidth = width; iconHeight = height;
-        strength = Math.Clamp(amount, 0, .85);
+        strength = double.IsFinite(amount) ? Math.Clamp(amount, 0, .95) : 0;
         var plane = resting + (outwardEnd ? 1 : -1) * (commonIconSize / 2 + 1.5);
         var depth = Math.Clamp(commonIconSize * .40, 11, 28);
         var start = outwardEnd ? plane : plane - depth;
@@ -41,7 +41,7 @@ internal sealed class DockReflection : FrameworkElement
         var far = vertical ? new Point(plane + (outwardEnd ? depth : -depth), 0) : new Point(0, plane + (outwardEnd ? depth : -depth));
         fade = new LinearGradientBrush { MappingMode = BrushMappingMode.Absolute, StartPoint = near, EndPoint = far };
         fade.GradientStops.Add(new GradientStop(Colors.White, 0));
-        fade.GradientStops.Add(new GradientStop(Color.FromArgb(166, 255, 255, 255), .48));
+        fade.GradientStops.Add(new GradientStop(Color.FromArgb(184, 255, 255, 255), .48));
         fade.GradientStops.Add(new GradientStop(Colors.Transparent, 1)); fade.Freeze();
         InvalidateVisual();
     }
@@ -77,7 +77,7 @@ internal sealed class DockReflection : FrameworkElement
         var bounds = ImageBounds;
         if (bounds.IsEmpty || !bounds.IntersectsWith(mirror.TransformBounds(shelf))) return;
         drawing.PushClip(clip);
-        drawing.PushOpacity(strength / (1 + Math.Abs(lift) * .015));
+        drawing.PushOpacity(strength / (1 + Math.Abs(lift) * .009));
         drawing.PushOpacityMask(fade);
         drawing.PushTransform(mirror);
         drawing.DrawImage(Source, bounds);

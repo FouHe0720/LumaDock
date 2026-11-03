@@ -24,13 +24,10 @@ public sealed class AppController : IDisposable
     private DockWindow? dock;
     private ControlCenterWindow? center;
     private HwndSource? messages;
-    private bool disposed, refreshing, exiting;
+    private bool disposed, refreshing, exiting, importing;
     private Stopwatch? centerClock;
     public AppState State { get; private set; }
     internal bool IsDisposed => disposed;
-    private DockSystemContext? systemContext;
-    internal DockSystemContext SystemContext => systemContext ??= new();
-    internal void ReleaseSystemContext() { var current = systemContext; systemContext = null; current?.Dispose(); }
     public event EventHandler? Changed;
     public DesktopFontInfo SystemIconFont => desktopFont.Current;
     public DesktopFontInfo NameFont => State.Settings.FollowSystemIconFont ? desktopFont.Current
@@ -157,21 +154,6 @@ public sealed class AppController : IDisposable
     { var selected = PrepareApplicationPin(app, ref gap); DockOrder.InsertAtGap(State.PinnedIds, [selected], gap); Save(); }
     public void Unpin(AppEntry app)
     { var ids = ApplicationEntries(app).Select(entry => entry.Id).ToHashSet(StringComparer.OrdinalIgnoreCase); State.PinnedIds.RemoveAll(ids.Contains); Save(); }
-    public void PinRunning(AppEntry running)
-    {
-        try
-        {
-            if (!RunningApps.CanPin(running)) { Notify("此窗口没有可单独固定的启动入口。"); return; }
-            if (running.Source != "Running") { Pin(running); return; }
-            if (running.LaunchPath.StartsWith("shell:AppsFolder\\", StringComparison.OrdinalIgnoreCase) && running.AppUserModelId.Contains('!'))
-            {
-                var found = new AppEntry { Id = Catalog.StableId("manual:" + running.LaunchPath), Name = running.Name, Source = "Manual", LaunchPath = running.LaunchPath, AppUserModelId = running.AppUserModelId, ExecutablePath = running.ExecutablePath, IsAvailable = true };
-                Catalog.Merge(State, [found]); Pin(Catalog.FindEquivalent(State, found) ?? found);
-            }
-            else Pin(GetOrAddManual(running.LaunchPath));
-        }
-        catch (Exception error) { Log.Write("Pin running application failed", error); Notify("此窗口暂时无法固定，请从应用库添加。"); }
-    }
     public void SetCustomIcon(AppEntry app, string? path)
     {
         var normalized = Catalog.NormalizeIconPath(path);
@@ -192,6 +174,51 @@ public sealed class AppController : IDisposable
     }
     public void Remove(AppEntry app) { app.Hidden = true; State.PinnedIds.Remove(app.Id); Save(); }
     public void AddManual(string path) { GetOrAddManual(path); Save(); }
+    /// <summary>Resolve Shell metadata away from WPF, then commit the batch once on its dispatcher.</summary>
+    public async Task<ApplicationImportResult> ImportApplicationsAsync(IEnumerable<string> paths, CancellationToken cancellation = default)
+    {
+        Application.Current.Dispatcher.VerifyAccess();
+        if (importing) return new([], [], false, true);
+        if (disposed || cancellation.IsCancellationRequested) return new([], [], true, false);
+        importing = true;
+        try
+        {
+            var batch = paths.Where(path => !string.IsNullOrWhiteSpace(path)).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+            var result = await RunStaAsync(() =>
+            {
+                var found = new List<AppEntry>(); var failures = new List<ApplicationImportFailure>();
+                foreach (var path in batch)
+                {
+                    cancellation.ThrowIfCancellationRequested();
+                    try { ValidateAppPath(path); found.Add(AppDiscovery.FromPath(path)); }
+                    catch (Exception error) when (error is IOException or InvalidDataException or UnauthorizedAccessException or ArgumentException or NotSupportedException or System.Runtime.InteropServices.COMException)
+                    { failures.Add(new(Path.GetFileName(path), error.Message)); Log.Write("Application import skipped an unavailable entry", error); }
+                }
+                return (found, failures);
+            });
+            if (disposed || cancellation.IsCancellationRequested) return new([], [], true, false);
+            if (result.found.Count == 0) return new([], result.failures, false, false);
+            // Save errors must not leave an apparently imported batch only in memory.
+            var previous = System.Text.Json.JsonSerializer.Serialize(State);
+            AppEntry[] entries;
+            try
+            {
+                Catalog.Merge(State, result.found);
+                entries = result.found.Select(found => Catalog.FindEquivalent(State, found)).OfType<AppEntry>().DistinctBy(app => app.Id).ToArray();
+                foreach (var entry in entries) entry.Hidden = false;
+                store.Save(State);
+            }
+            catch
+            {
+                State = System.Text.Json.JsonSerializer.Deserialize<AppState>(previous) ?? State;
+                throw;
+            }
+            Changed?.Invoke(this, EventArgs.Empty); dock?.Rebuild();
+            return new(entries, result.failures, false, false);
+        }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { return new([], [], true, false); }
+        finally { importing = false; }
+    }
     public AppEntry GetOrAddManual(string path)
     {
         ValidateAppPath(path);
@@ -209,7 +236,7 @@ public sealed class AppController : IDisposable
             foreach (var path in batch)
             {
                 try { ValidateAppPath(path); found.Add(AppDiscovery.FromPath(path)); }
-                catch (Exception error) when (error is IOException or UnauthorizedAccessException or ArgumentException or System.Runtime.InteropServices.COMException) { failures++; Log.Write("Dock import skipped an unavailable file", error); }
+                catch (Exception error) when (error is IOException or InvalidDataException or UnauthorizedAccessException or ArgumentException or System.Runtime.InteropServices.COMException) { failures++; Log.Write("Dock import skipped an unavailable file", error); }
             }
             return (found, failures);
         });
@@ -328,7 +355,7 @@ public sealed class AppController : IDisposable
         Tracker.Changed -= WindowsChanged; Tracker.Dispose(); icons.Dispose();
         if (messages != null) { Native.UnregisterHotKey(messages.Handle, 1); messages.Dispose(); }
         if (tray != null) { tray.Visible = false; tray.ContextMenuStrip?.Dispose(); tray.Icon?.Dispose(); tray.Dispose(); }
-        dock?.Close(); center?.ClosePermanently(); systemContext?.Dispose();
+        dock?.Close(); center?.ClosePermanently();
     }
     private static class Native
     {
@@ -336,3 +363,6 @@ public sealed class AppController : IDisposable
         [System.Runtime.InteropServices.DllImport("user32.dll")] internal static extern bool UnregisterHotKey(IntPtr hwnd, int id);
     }
 }
+
+public sealed record ApplicationImportFailure(string Name, string Reason);
+public sealed record ApplicationImportResult(IReadOnlyList<AppEntry> Entries, IReadOnlyList<ApplicationImportFailure> Failures, bool Cancelled, bool Busy);

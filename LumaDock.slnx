@@ -13,13 +13,10 @@
     <Project Path="tests/LumaDock.Dock.Ui.Tests/LumaDock.Dock.Ui.Tests.csproj" />
     <Project Path="tests/LumaDock.Font.Tests/LumaDock.Font.Tests.csproj" />
     <Project Path="tests/LumaDock.Icon.Tests/LumaDock.Icon.Tests.csproj" />
-    <Project Path="tests/LumaDock.Input.Tests/LumaDock.Input.Tests.csproj" />
+    <Project Path="tests/LumaDock.Importer.Ui.Tests/LumaDock.Importer.Ui.Tests.csproj" />
     <Project Path="tests/LumaDock.Layout.Tests/LumaDock.Layout.Tests.csproj" />
     <Project Path="tests/LumaDock.Lens.Tests/LumaDock.Lens.Tests.csproj" />
-    <Project Path="tests/LumaDock.Running.Tests/LumaDock.Running.Tests.csproj" />
     <Project Path="tests/LumaDock.Sampler.Tests/LumaDock.Sampler.Tests.csproj" />
-    <Project Path="tests/LumaDock.System.Tests/LumaDock.System.Tests.csproj" />
-    <Project Path="tests/LumaDock.System.Ui.Tests/LumaDock.System.Ui.Tests.csproj" />
     <Project Path="tests/LumaDock.Tests/LumaDock.Tests.csproj" />
     <Project Path="tests/LumaDock.Typography.Ui.Tests/LumaDock.Typography.Ui.Tests.csproj" />
     <Project Path="tests/LumaDock.Ui.Tests/LumaDock.Ui.Tests.csproj" />

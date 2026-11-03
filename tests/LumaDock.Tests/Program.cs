@@ -406,12 +406,12 @@ Test("Unavailable apps stay recoverable with pin order and custom metadata but a
 Test("Dock transparency migration and reflection controls preserve explicit user settings", () =>
 {
     var defaults = new AppState { SchemaVersion = 1, Settings = new() { Opacity = .88 } }; Catalog.Normalize(defaults);
-    Assert(defaults.Settings.Opacity == .70 && defaults.Settings.IconReflection && defaults.Settings.ReflectionStrength == .24);
+    Assert(defaults.Settings.Opacity == .70 && defaults.Settings.IconReflection && defaults.Settings.ReflectionStrength == .50);
     defaults.Settings.Opacity = .88; Catalog.Normalize(defaults); Assert(defaults.Settings.Opacity == .88);
     var custom = new AppState { Settings = new() { Opacity = .23, ReflectionStrength = 900, IconReflection = false } }; Catalog.Normalize(custom);
-    Assert(custom.Settings.Opacity == .23 && custom.Settings.ReflectionStrength == .85 && !custom.Settings.IconReflection);
+    Assert(custom.Settings.Opacity == .23 && custom.Settings.ReflectionStrength == .95 && !custom.Settings.IconReflection);
     custom.Settings.Opacity = 0; custom.Settings.ReflectionStrength = double.NaN; Catalog.Normalize(custom);
-    Assert(custom.Settings.Opacity == .02 && custom.Settings.ReflectionStrength == .24);
+    Assert(custom.Settings.Opacity == .02 && custom.Settings.ReflectionStrength == .50);
 });
 Test("Extended Dock clarity, reflection and vibrancy survive saving and reject non-finite values", () =>
 {
@@ -427,33 +427,6 @@ Test("Text colors normalize to bounded opaque RGB and reject brushes or markup",
     Assert(Catalog.NormalizeTextColor(" #c0a1ff ") == "#C0A1FF");
     foreach (var value in new[] { "", "red", "#12345", "#00112233", "{DynamicResource TextBrush}", "#GGGGGG", "https://example.invalid/brush" })
         Assert(Catalog.NormalizeTextColor(value) == "");
-});
-Test("System Dock controls default on without altering persisted user appearance", () =>
-{
-    var old = JsonSerializer.Deserialize<AppState>("""{"SchemaVersion":2,"Settings":{"Theme":"Dark","IconSize":64,"AutoHide":true}}""")!;
-    Catalog.Normalize(old);
-    Assert(old.Settings.DockSystemEnabled && old.Settings.ShowRunningApps);
-    Assert(old.Settings.DockStatusIconSize == 16 && old.Settings.DockStatusFontSize == 12 && old.Settings.DockStatusFontWeight == 600);
-    Assert(old.Settings.Theme == "Dark" && old.Settings.IconSize == 64 && old.Settings.AutoHide);
-});
-Test("System Dock controls persist independently of name and application icon settings", () =>
-{
-    var st = Store("system-dock-style");
-    var state = new AppState { Settings = new() { DockSystemEnabled = false, ShowRunningApps = false,
-        DockStatusIconSize = 23, DockStatusFontSize = 17, DockStatusFontWeight = 800, IconSize = 55,
-        FollowSystemIconFont = false, NameFontSize = 22, NameFontBold = false } };
-    st.Save(state); var read = st.Load().Settings;
-    Assert(!read.DockSystemEnabled && !read.ShowRunningApps && read.DockStatusIconSize == 23 && read.DockStatusFontSize == 17 && read.DockStatusFontWeight == 800);
-    Assert(read.IconSize == 55 && read.NameFontSize == 22 && !read.NameFontBold && !read.FollowSystemIconFont);
-});
-Test("Imported system Dock dimensions reject non-finite and out-of-range values", () =>
-{
-    var state = new AppState { Settings = new() { DockStatusIconSize = double.NaN, DockStatusFontSize = double.PositiveInfinity, DockStatusFontWeight = int.MinValue } };
-    Catalog.Normalize(state); Assert(state.Settings.DockStatusIconSize == 16 && state.Settings.DockStatusFontSize == 12 && state.Settings.DockStatusFontWeight == 400);
-    state.Settings.DockStatusIconSize = 99; state.Settings.DockStatusFontSize = -10; state.Settings.DockStatusFontWeight = int.MaxValue;
-    Catalog.Normalize(state); Assert(state.Settings.DockStatusIconSize == 24 && state.Settings.DockStatusFontSize == 10 && state.Settings.DockStatusFontWeight == 800);
-    state.Settings.DockStatusIconSize = -1; state.Settings.DockStatusFontSize = 99;
-    Catalog.Normalize(state); Assert(state.Settings.DockStatusIconSize == 12 && state.Settings.DockStatusFontSize == 18);
 });
 var reportIndex = Array.IndexOf(args, "--report");
 var report = new { timestamp = DateTimeOffset.Now, os = Environment.OSVersion.ToString(), framework = System.Runtime.InteropServices.RuntimeInformation.FrameworkDescription, passed = results.Count(r => r.Passed), failed = results.Count(r => !r.Passed), cases = results, fixtureDirectory = root };
