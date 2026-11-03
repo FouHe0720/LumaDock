@@ -30,7 +30,7 @@ using TextBox = System.Windows.Controls.TextBox;
 namespace LumaDock.App.Center;
 
 /// <summary>The management surface. Closing normally hides this window, keeping the resident dock alive.</summary>
-public sealed class ControlCenterWindow : Window
+public sealed partial class ControlCenterWindow : Window
 {
     private const string AppDragFormat = "LumaDock.AppEntry.Id";
     private static readonly Lazy<BitmapSource> BrandArtwork = new(() =>
@@ -90,9 +90,10 @@ public sealed class ControlCenterWindow : Window
     public double LastOpenMilliseconds { get; private set; }
     public string CurrentSection => _section;
 
-    public ControlCenterWindow(AppController controller, string section = "Launchpad")
+    public ControlCenterWindow(AppController controller, string section = "Launchpad", DesktopFileService? desktopFiles = null)
     {
         _controller = controller;
+        _desktopFiles = desktopFiles ?? new DesktopFileService();
         _liquid = new LiquidGlassSurface(this, controller);
         _section = NormalizeSection(section);
         Title = "LumaDock";
@@ -114,9 +115,10 @@ public sealed class ControlCenterWindow : Window
         BuildChrome();
         _controller.Changed += ControllerChanged;
         PreviewKeyDown += (_, e) => { if (e.Key == Key.Escape) { HideSmoothly(); e.Handled = true; } };
+        PreviewKeyDown += DesktopKeyDown;
         Closing += OnClosing;
         Closed += (_, _) => DisposeSubscriptions();
-        IsVisibleChanged += (_, _) => { if (IsVisible) { Render(); AnimateOpen(); } };
+        IsVisibleChanged += (_, _) => { if (IsVisible) { Render(); AnimateOpen(); } else StopDesktopWatching(); };
         SizeChanged += (_, _) => QueueGridResize();
         PreviewMouseMove += (_, e) => { if (!_controller.ReducedMotion) _glassRim.TrackPointer(e.GetPosition(_glassRim)); };
         MouseLeave += (_, _) => _glassRim.ReleasePointer();
@@ -222,8 +224,9 @@ public sealed class ControlCenterWindow : Window
 
     private void Render()
     {
+        UpdateDesktopWatching();
         if (_category != "全部应用" && !_controller.State.Categories.Contains(_category)) _category = "全部应用";
-        if (_section is "Launchpad" or "Desktop") RebuildApplicationGroups();
+        if (_section == "Launchpad") RebuildApplicationGroups();
         _fontPreview = null; _fontPreviewInfo = null;
         _settingsRoot = null; _settingsGroup = null;
         _categoryCounts.Clear();
@@ -251,7 +254,7 @@ public sealed class ControlCenterWindow : Window
         {
             case "Settings": BuildSettings(); break;
             case "About": BuildAbout(); break;
-            case "Desktop": BuildApps(true); break;
+            case "Desktop": BuildDesktop(); break;
             default: BuildApps(false); break;
         }
         toolRail.Visibility = _tools.Children.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
@@ -1085,7 +1088,7 @@ public sealed class ControlCenterWindow : Window
     private void Safe(Action action) { try { action(); } catch (Exception ex) { ShowError(ex); } }
     private void ShowError(Exception ex) { Debug.WriteLine(ex); _controller.Notify(ex.Message); }
 
-    private string? AskText(string title, string hint, string initial, string confirm = "保存")
+    private string? AskText(string title, string hint, string initial, string confirm = "保存", int maxLength = 40)
     {
         var dialog = new Window { Owner = this, Title = title, Width = 400, Height = 245, WindowStyle = WindowStyle.None, ResizeMode = ResizeMode.NoResize, WindowStartupLocation = WindowStartupLocation.CenterOwner, ShowInTaskbar = false, FontFamily = FontFamily };
         dialog.SetResourceReference(ForegroundProperty, "TextBrush");
@@ -1095,7 +1098,7 @@ public sealed class ControlCenterWindow : Window
         var heading = Text(title, 19, FontWeights.SemiBold); heading.Margin = new Thickness(0, 0, 0, 18); heading.MouseLeftButtonDown += (_, e) => { if (e.ButtonState == MouseButtonState.Pressed) dialog.DragMove(); }; stack.Children.Add(heading);
         var prompt = Text(hint, 11, FontWeights.Normal, true); stack.Children.Add(prompt);
         var inputBorder = new Border { Margin = new Thickness(0, 8, 0, 20), CornerRadius = new CornerRadius(12), Padding = new Thickness(12, 10, 12, 10), BorderThickness = new Thickness(.8) }; inputBorder.SetResourceReference(Border.BackgroundProperty, "PanelBrush"); inputBorder.SetResourceReference(Border.BorderBrushProperty, "BorderBrush"); stack.Children.Add(inputBorder);
-        var input = new TextBox { Text = initial, Background = Brushes.Transparent, BorderThickness = new Thickness(0), FontSize = 14, MaxLength = 40 }; input.SetResourceReference(Control.ForegroundProperty, "TextBrush"); System.Windows.Automation.AutomationProperties.SetName(input, hint); var inputField = new Grid(); inputField.Children.Add(input); inputField.Children.Add(StaticCaret.Create(input)); inputBorder.Child = inputField;
+        var input = new TextBox { Text = initial, Background = Brushes.Transparent, BorderThickness = new Thickness(0), FontSize = 14, MaxLength = maxLength }; input.SetResourceReference(Control.ForegroundProperty, "TextBrush"); System.Windows.Automation.AutomationProperties.SetName(input, hint); var inputField = new Grid(); inputField.Children.Add(input); inputField.Children.Add(StaticCaret.Create(input)); inputBorder.Child = inputField;
         var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right }; stack.Children.Add(buttons);
         buttons.Children.Add(ActionButton("取消", () => dialog.DialogResult = false)); var ok = ActionButton(confirm, () => dialog.DialogResult = true, true); ok.IsDefault = true; buttons.Children.Add(ok);
         dialog.PreviewKeyDown += (_, e) => { if (e.Key == Key.Escape) { dialog.DialogResult = false; e.Handled = true; } };
@@ -1122,7 +1125,7 @@ public sealed class ControlCenterWindow : Window
         if (_resizeQueued || _disposed || _section is "Settings" or "About") return;
         _resizeQueued = true;
         Dispatcher.BeginInvoke(DispatcherPriority.Background, () =>
-        { _resizeQueued = false; if (IsVisible && _section is not ("Settings" or "About")) RenderAppGrid(_section == "Desktop"); });
+        { _resizeQueued = false; if (IsVisible && _section is not ("Settings" or "About")) { if (_section == "Desktop") RenderDesktopGrid(); else RenderAppGrid(false); } });
     }
 
     private void OnClosing(object? sender, CancelEventArgs e)
@@ -1137,6 +1140,6 @@ public sealed class ControlCenterWindow : Window
         }
     }
 
-    private void DisposeSubscriptions() { if (_disposed) return; _disposed = true; _importCancellation?.Cancel(); _controller.Changed -= ControllerChanged; }
+    private void DisposeSubscriptions() { if (_disposed) return; _disposed = true; StopDesktopWatching(); _importCancellation?.Cancel(); _controller.Changed -= ControllerChanged; }
     private sealed record Choice(string Value, string Label);
 }

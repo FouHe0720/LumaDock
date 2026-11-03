@@ -4,6 +4,7 @@ param(
     [ValidateRange(1,60)][int]$IntervalSeconds = 5,
     [ValidateRange(0,120)][int]$WarmupSeconds = 15,
     [switch]$ShowLaunchpad,
+    [switch]$ShowDesktop,
     [string]$SeedConfig = ''
 )
 # Measurement is outside the app. Only the process created here is terminated.
@@ -76,7 +77,8 @@ if ($SeedConfig) {
     Copy-Item -LiteralPath $LumaSeedPath -Destination (Join-Path $LumaDataDir 'config.json')
 }
 $LumaArguments = '--data-dir "' + $LumaDataDir + '" --diagnostics-dir "' + $LumaDiagnosticDir + '"'
-if ($ShowLaunchpad) { $LumaArguments += ' --show-launchpad' }
+if ($ShowDesktop) { $LumaArguments += ' --show-desktop' }
+elseif ($ShowLaunchpad) { $LumaArguments += ' --show-launchpad' }
 $LumaTimer = [Diagnostics.Stopwatch]::StartNew()
 $LumaMeasuredProcess = Start-Process -FilePath $Executable -ArgumentList $LumaArguments -WorkingDirectory (Split-Path -Parent $Executable) -WindowStyle Hidden -PassThru
 $LumaSamples = [Collections.Generic.List[object]]::new()
@@ -139,6 +141,7 @@ $LumaSummary = [ordered]@{
     requestedMeasurementSeconds = $Seconds
     actualTotalSeconds = [math]::Round($LumaTimer.Elapsed.TotalSeconds, 3)
     launchpadOpen = [bool]$ShowLaunchpad
+    desktopOpen = [bool]$ShowDesktop
     seededConfiguration = [bool]$SeedConfig
     configuredPinnedApps = if ($LumaFinalConfig) { @($LumaFinalConfig.PinnedIds).Count } else { $null }
     iconReflectionEnabled = if ($LumaFinalConfig) { [bool]$LumaFinalConfig.Settings.IconReflection } else { $null }

@@ -50,10 +50,11 @@ public static class Program
                 await controller.RefreshAppsAsync();
                 if (controller.IsDisposed) return;
                 ready = true;
-                if (activationPending || args.Contains("--center") || args.Contains("--show-launchpad")) controller.RevealCenter();
+                if (args.Contains("--show-desktop")) controller.RevealCenter("Desktop");
+                else if (activationPending || args.Contains("--center") || args.Contains("--show-launchpad")) controller.RevealCenter();
                 if (args.Contains("--smoke-test"))
                 {
-                    if (!args.Contains("--center") && !args.Contains("--show-launchpad")) controller.RevealCenter();
+                    if (!args.Contains("--center") && !args.Contains("--show-launchpad") && !args.Contains("--show-desktop")) controller.RevealCenter();
                     await Task.Delay(8000); controller.Exit();
                 }
             }

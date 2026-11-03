@@ -10,6 +10,7 @@ using System.Windows.Threading;
 using LumaDock.App;
 using LumaDock.App.Center;
 using LumaDock.Storage;
+using LumaDock.Windows;
 
 namespace LumaDock.Ui.Tests;
 
@@ -47,14 +48,22 @@ internal static class Program
                 realApps = ApplicationPresentation.Group(controller.State.Apps.Where(entry => !entry.Hidden && entry.IsAvailable)).Count;
                 Require(realApps > 0, "DiscoveryEmpty");
                 Require(controller.State.Categories.Count == 0 && controller.State.Apps.All(entry => entry.Category.Length == 0), "FreshProfileHasAutomaticColumns");
-                window = NewWindow(controller);
+                var fixtureDesktop = Directory.CreateDirectory(Path.Combine(data, "fixture-desktop")).FullName;
+                Directory.CreateDirectory(Path.Combine(fixtureDesktop, "桌面生命周期文件夹"));
+                File.WriteAllText(Path.Combine(fixtureDesktop, "桌面生命周期文档.txt"), "Owned lifecycle fixture");
+                File.WriteAllText(Path.Combine(fixtureDesktop, "桌面生命周期快捷方式.url"), "[InternetShortcut]\r\nURL=https://example.com/\r\n");
+                var desktopFiles = new DesktopFileService(fixtureDesktop, "");
+                window = NewWindow(controller, desktopFiles);
                 window.Show(); await Frame();
                 Require(window.IsVisible, "InitialShow");
                 window.Navigate("Settings"); await Frame();
-                window.Navigate("Desktop"); await Frame();
+                window.Navigate("Desktop"); await WaitForDesktop(window);
                 Require(window.CurrentSection == "Desktop", "DesktopViewNotRestored");
                 Require(Descendants<Button>(window).Count(button => Equals(button.Tag, "Navigation:Launchpad")) == 1
                     && Descendants<Button>(window).Count(button => Equals(button.Tag, "Navigation:Desktop")) == 1 && !Descendants<Button>(window).Any(button => Equals(button.Tag, "Dock 已固定")), "DuplicateDefaultNavigation");
+                var desktopPaths = Descendants<Button>(window).Select(button => button.DataContext).OfType<DesktopItem>().Select(item => item.Path).ToArray();
+                Require(desktopPaths.Length == 3 && desktopPaths.Distinct(StringComparer.OrdinalIgnoreCase).Count() == desktopPaths.Length && desktopPaths.ToHashSet(StringComparer.OrdinalIgnoreCase).SetEquals(desktopFiles.Scan().Items.Select(item => item.Path)), "DuplicateOrMissingDesktopItem");
+                window.Navigate("Launchpad"); await Frame();
                 var firstPageIds = Descendants<Button>(window).Select(button => button.DataContext).OfType<AppTileViewModel>().Select(model => model.Entry.Id).ToArray();
                 Require(firstPageIds.Length > 0 && firstPageIds.Distinct().Count() == firstPageIds.Length, "DuplicateVisibleApplication");
                 window.HideSmoothly(); await Frame();
@@ -92,7 +101,7 @@ internal static class Program
                 // A closed WPF Window cannot be reopened. Exercise new window recreation three times.
                 for (var index = 0; index < 3; index++)
                 {
-                    window = NewWindow(controller); window.Show(); await Frame();
+                    window = NewWindow(controller, desktopFiles); window.Show(); await Frame();
                     Require(window.IsVisible, "RecreatedShow"); window.ClosePermanently(); window = null; await Frame();
                 }
                 controller.Dispose(); controller = null;
@@ -127,9 +136,9 @@ internal static class Program
         app.Run(); return exitCode;
     }
 
-    private static ControlCenterWindow NewWindow(AppController controller)
+    private static ControlCenterWindow NewWindow(AppController controller, DesktopFileService desktopFiles)
     {
-        var window = new ControlCenterWindow(controller) { ShowActivated = false, ShowInTaskbar = false };
+        var window = new ControlCenterWindow(controller, desktopFiles: desktopFiles) { ShowActivated = false, ShowInTaskbar = false };
         // Disable only this test HWND: prevents Navigate.Activate from interrupting the user's foreground app.
         window.SourceInitialized += (_, _) => EnableWindow(new WindowInteropHelper(window).Handle, false);
         window.ContentRendered += (_, _) => rendered++;
@@ -141,6 +150,15 @@ internal static class Program
     {
         await Application.Current.Dispatcher.InvokeAsync(() => { }, DispatcherPriority.ApplicationIdle);
         await Task.Delay(20); // Allow real WPF composition/visibility work rather than testing only setters.
+    }
+    private static async Task WaitForDesktop(ControlCenterWindow window)
+    {
+        for (var attempt = 0; attempt < 80; attempt++)
+        {
+            await Frame();
+            if (Descendants<Button>(window).Count(button => button.DataContext is DesktopItem) == 3) return;
+        }
+        throw new InvalidOperationException("DesktopFixtureDidNotRender");
     }
     private static IEnumerable<T> Descendants<T>(DependencyObject parent) where T : DependencyObject
     {

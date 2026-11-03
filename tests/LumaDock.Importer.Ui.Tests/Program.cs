@@ -52,15 +52,21 @@ internal static class Program
                 if (args.Contains("--metadata-only")) { exit = errors.Count == 0 ? 0 : 1; return; }
                 var desktop = c.State.Apps.First(x => x.Id == imported.Entries[0].Id); desktop.DesktopPaths.Add(firstUrl);
                 var missingMembership = c.State.Apps.First(x => x.Id == imported.Entries[1].Id); missingMembership.DesktopPaths.Add(Path.Combine(root, "missing-shortcut.lnk")); c.Save();
-                w = new ControlCenterWindow(c) { Width = 1120, Height = 760, ShowActivated = false, ShowInTaskbar = false }; w.Show(); await Frame();
+                var fixtureDesktop = Directory.CreateDirectory(Path.Combine(root, "fixture-desktop")).FullName;
+                var desktopUrl = Path.Combine(fixtureDesktop, Path.GetFileName(firstUrl)); File.Copy(firstUrl, desktopUrl, false);
+                File.WriteAllText(Path.Combine(fixtureDesktop, "桌面文档.txt"), "Owned desktop fixture");
+                var desktopFolder = Directory.CreateDirectory(Path.Combine(fixtureDesktop, "资料文件夹")).FullName;
+                File.WriteAllText(Path.Combine(desktopFolder, "nested.txt"), "Not a top-level desktop item");
+                var desktopFiles = new DesktopFileService(fixtureDesktop, "");
+                w = new ControlCenterWindow(c, desktopFiles: desktopFiles) { Width = 1120, Height = 760, ShowActivated = false, ShowInTaskbar = false }; w.Show(); await Frame();
                 var grid = Descendants(w).OfType<UniformGrid>().Single(x => x.Children.OfType<Button>().Any(b => b.DataContext is AppTileViewModel));
                 Check("A normal 1120 by 760 window shows three complete rows at 15 DIP", grid.Columns == 6 && grid.Children.Count == 18);
                 var view = Descendants(w).OfType<ScrollViewer>().Single(x => ReferenceEquals(x.Content, grid));
                 Check("All three rows fit the actual viewport without clipping names", grid.ActualHeight <= view.ViewportHeight + .5 && grid.Children.OfType<Button>().All(b => Descendants(b).OfType<TextBlock>().Where(t => Equals(t.Tag, "ApplicationName")).All(t => t.ActualHeight + .5 >= t.LineHeight * 2)));
                 Check("The hotkey has a visible explanation and a clickable named action", Descendants(w).OfType<Button>().Any(b => Equals(b.Tag, "QuickLaunchHint") && AutomationProperties.GetName(b).Contains("快速打开应用库")) && Descendants(w).OfType<TextBlock>().Any(t => t.Text == "快速打开应用库"));
-                w.Navigate("Desktop"); await Frame();
-                var desktopCards = Descendants(w).OfType<Button>().Where(x => x.DataContext is AppTileViewModel).ToArray();
-                Check("Desktop navigation shows existing shortcut members and excludes missing membership", w.CurrentSection == "Desktop" && desktopCards.Length == 1 && ((AppTileViewModel)desktopCards[0].DataContext).Entry.Id == desktop.Id);
+                w.Navigate("Desktop"); await WaitForDesktop(w);
+                var desktopCards = Descendants(w).OfType<Button>().Where(x => x.DataContext is DesktopItem).ToArray();
+                Check("Desktop navigation shows real files, folders and shortcuts independently of catalog membership", w.CurrentSection == "Desktop" && desktopCards.Length == 3 && desktopCards.Select(card => ((DesktopItem)card.DataContext).Path).ToHashSet(StringComparer.OrdinalIgnoreCase).SetEquals(desktopFiles.Scan().Items.Select(item => item.Path)) && desktopCards.Any(card => ((DesktopItem)card.DataContext).IsDirectory) && !Descendants(w).OfType<Button>().Any(card => card.DataContext is AppTileViewModel) && File.Exists(firstUrl) && File.Exists(desktopUrl));
                 w.Navigate("Launchpad"); await Frame(); var search = Descendants(w).OfType<TextBox>().Single(x => AutomationProperties.GetName(x) == "搜索应用"); search.Text = "no matching filter"; await Frame();
                 var last = Url(99);
                 var add = (Task)typeof(ControlCenterWindow).GetMethod("ImportApplicationPathsAsync", BindingFlags.Instance | BindingFlags.NonPublic)!.Invoke(w, [new[] { last }])!; await add; await Frame();
@@ -75,5 +81,14 @@ internal static class Program
         }; app.Run(); return exit;
     }
     private static async Task Frame() { await Dispatcher.Yield(DispatcherPriority.ApplicationIdle); await Task.Delay(100); }
+    private static async Task WaitForDesktop(ControlCenterWindow window)
+    {
+        for (var attempt = 0; attempt < 40; attempt++)
+        {
+            await Frame();
+            if (Descendants(window).OfType<Button>().Any(button => button.DataContext is DesktopItem)) return;
+        }
+        throw new InvalidOperationException("Desktop fixture did not finish rendering.");
+    }
     private static IEnumerable<DependencyObject> Descendants(DependencyObject root) { yield return root; for (var i = 0; i < VisualTreeHelper.GetChildrenCount(root); i++) foreach (var child in Descendants(VisualTreeHelper.GetChild(root, i))) yield return child; }
 }

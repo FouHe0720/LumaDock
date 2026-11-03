@@ -83,6 +83,16 @@ public sealed class IconService : IDisposable
         if (!LocalPath(path)) return path;
         try
         {
+            if (Directory.Exists(path))
+            {
+                // A directory's last-write time changes whenever children are added.
+                // Its Shell icon normally does not; only desktop.ini customizations
+                // participate in the cache version, keeping desktop refreshes cheap.
+                var customization = new FileInfo(Path.Combine(path, "desktop.ini"));
+                return customization.Exists
+                    ? path + "|directory|" + customization.LastWriteTimeUtc.Ticks + "|" + customization.Length
+                    : path + "|directory";
+            }
             var file = new FileInfo(path);
             return file.Exists ? path + "|" + file.LastWriteTimeUtc.Ticks + "|" + file.Length : path + "|missing";
         }
@@ -116,7 +126,7 @@ public sealed class IconService : IDisposable
         }
         // File shortcuts retain their own icon, even after scanning merges an AppsFolder identity.
         var candidates = new List<string>();
-        if (LocalPath(request.LaunchPath) && File.Exists(request.LaunchPath)) candidates.Add(request.LaunchPath);
+        if (LocalPath(request.LaunchPath) && (File.Exists(request.LaunchPath) || Directory.Exists(request.LaunchPath))) candidates.Add(request.LaunchPath);
         if (!string.IsNullOrWhiteSpace(request.AppUserModelId)) candidates.Add("shell:AppsFolder\\" + request.AppUserModelId);
         if (request.LaunchPath.StartsWith("shell:AppsFolder\\", StringComparison.OrdinalIgnoreCase)) candidates.Add(request.LaunchPath);
         if (LocalPath(request.ExecutablePath) && File.Exists(request.ExecutablePath)) candidates.Add(request.ExecutablePath);

@@ -53,7 +53,14 @@ internal static class Program
                 Require(controller.State.Apps.Count > 0, "No real applications were discovered.");
                 Require(controller.State.Settings.FollowSystemIconFont, "A fresh profile must follow the desktop font.");
                 nativeFont = DesktopFontService.Read();
-                window = new ControlCenterWindow(controller) { ShowActivated = false, ShowInTaskbar = false };
+                var fixtureDesktop = Directory.CreateDirectory(Path.Combine(dataPath, "fixture-desktop")).FullName;
+                var fixtureCommonDesktop = Directory.CreateDirectory(Path.Combine(dataPath, "fixture-common-desktop")).FullName;
+                for (var index = 0; index < 20; index++) File.WriteAllText(Path.Combine(fixtureDesktop, $"桌面字体排版示例文档 {index:00}.txt"), "Owned typography fixture");
+                for (var index = 0; index < 4; index++) Directory.CreateDirectory(Path.Combine(fixtureDesktop, $"桌面字体排版示例文件夹 {index:00}"));
+                File.WriteAllText(Path.Combine(fixtureCommonDesktop, "公共桌面文档.txt"), "Owned common fixture");
+                Directory.CreateDirectory(Path.Combine(fixtureCommonDesktop, "公共桌面文件夹"));
+                var desktopFiles = new DesktopFileService(fixtureDesktop, fixtureCommonDesktop);
+                window = new ControlCenterWindow(controller, desktopFiles: desktopFiles) { ShowActivated = false, ShowInTaskbar = false };
                 window.SourceInitialized += (_, _) => EnableWindow(new WindowInteropHelper(window).Handle, false);
                 window.Show(); await Frame();
 
@@ -67,13 +74,17 @@ internal static class Program
                 });
                 var totalBeforeAlias = System.Windows.Automation.AutomationProperties.GetHelpText(Descendants<Button>(window).Single(button => Equals(button.Tag, "全部应用")));
                 var firstPageBeforeAlias = Descendants<Button>(window).Where(button => button.DataContext is AppTileViewModel).Select(button => ((AppTileViewModel)button.DataContext).Entry.Id).ToArray();
-                window.Navigate("Desktop"); await Frame();
-                Test("Desktop navigation shows actual existing shortcut members and a matching count", () =>
+                window.Navigate("Desktop"); await WaitForDesktop(window);
+                Test("Desktop navigation shows real top-level files and folders with a matching count and no app categories", () =>
                 {
                     Require(window.CurrentSection == "Desktop", "Desktop view was not restored.");
-                    var expected = ApplicationPresentation.Group(controller.State.Apps).Count(group => group.Entries.Any(app => !app.Hidden && app.IsAvailable && (app.DesktopPaths.Any(File.Exists) || (app.Source == "Desktop" && File.Exists(app.LaunchPath)))));
-                    Require(System.Windows.Automation.AutomationProperties.GetHelpText(Descendants<Button>(window).Single(button => Equals(button.Tag, "全部应用"))) == $"{expected} 个应用", "Desktop count is not its actual shortcut subset.");
-                    Require(Descendants<Button>(window).Where(button => button.DataContext is AppTileViewModel).All(button => { var app = ((AppTileViewModel)button.DataContext).Entry; return app.DesktopPaths.Any(File.Exists) || app.Source == "Desktop" && File.Exists(app.LaunchPath); }), "Desktop contains a non-desktop card.");
+                    var expected = desktopFiles.Scan();
+                    Require(expected.Errors.Count == 0 && expected.Items.Count == 26, "Owned desktop fixture is incomplete.");
+                    Require(Descendants<TextBlock>(window).Any(text => text.Text.StartsWith($"{expected.Items.Count} 个项目 ·", StringComparison.Ordinal)), "Desktop count does not match its real snapshot.");
+                    var cards = Descendants<Button>(window).Where(button => button.DataContext is DesktopItem).ToArray();
+                    Require(cards.Length > 0 && cards.Any(button => ((DesktopItem)button.DataContext).IsDirectory) && cards.Any(button => !((DesktopItem)button.DataContext).IsDirectory), "Files and folders were not rendered together.");
+                    Require(cards.All(button => expected.Items.Any(item => item.Path == ((DesktopItem)button.DataContext).Path)), "Desktop contains a non-desktop card.");
+                    Require(!Descendants<Button>(window).Any(button => button.DataContext is AppTileViewModel || Equals(button.Tag, "全部应用")), "Desktop still presents catalog records or app category controls.");
                 });
                 var createColumn = typeof(ControlCenterWindow).GetMethod("TryCreateCategory", BindingFlags.Instance | BindingFlags.NonPublic)!;
                 var renameColumn = typeof(ControlCenterWindow).GetMethod("TryRenameCategory", BindingFlags.Instance | BindingFlags.NonPublic)!;
@@ -319,8 +330,8 @@ internal static class Program
                     Require(largeSnapshot.VisibleTileCount < defaultSnapshot.VisibleTileCount, "Large labels were squeezed into the default page density.");
                 });
 
-                window.Navigate("Desktop"); await Frame();
-                var desktopSnapshot = Inspect(window, "manual-40-bold-unified-legacy-entry");
+                window.Navigate("Desktop"); await WaitForDesktop(window);
+                var desktopSnapshot = Inspect(window, "manual-40-bold-desktop-files");
                 Test("Desktop entries preserve the selected font and adaptive layout", () =>
                 {
                     Require(desktopSnapshot.VisibleTileCount > 0 && window.CurrentSection == "Desktop", "Desktop entry did not use the desktop collection.");
@@ -329,7 +340,7 @@ internal static class Program
                 });
 
                 controller.State.Settings.FollowSystemIconFont = true;
-                controller.ApplySettings(); window.Navigate("Desktop"); await Frame();
+                controller.ApplySettings(); window.Navigate("Desktop"); await WaitForDesktop(window);
                 Inspect(window, "restored-system-desktop");
                 Test("Switching back to the system font restores native desktop typography", () =>
                 {
@@ -588,7 +599,7 @@ internal static class Program
 
     private static void CheckPrimaryTextColor(ControlCenterWindow window, Color expected)
     {
-        var primary = Descendants<TextBlock>(window).Where(text => Equals(text.Tag, "NavigationLabel") || Equals(text.Tag, "PageHeading") || Equals(text.Tag, "ApplicationName"))
+        var primary = Descendants<TextBlock>(window).Where(text => Equals(text.Tag, "NavigationLabel") || Equals(text.Tag, "PageHeading") || Equals(text.Tag, "ApplicationName") || Equals(text.Tag, "DesktopItemName"))
             .Concat(Descendants<Button>(window).Where(button => Equals(button.Tag, "全部应用") || Equals(button.Tag, "个人栏目")).Select(button => Descendants<TextBlock>(button).First())).ToArray();
         Require(primary.Length >= 8, "Primary labels are missing from the actual visual tree.");
         Require(primary.All(text => text.Foreground is SolidColorBrush brush && brush.Color == expected), "A primary interface label ignored custom text color.");
@@ -596,11 +607,11 @@ internal static class Program
 
     private static void CheckLabelBounds(ControlCenterWindow window)
     {
-        var tiles = Descendants<Button>(window).Where(t => t.DataContext is AppTileViewModel && t.IsVisible).ToArray();
+        var tiles = Descendants<Button>(window).Where(t => (t.DataContext is AppTileViewModel or DesktopItem) && t.IsVisible).ToArray();
         Require(tiles.Length > 0, "No application tiles were rendered.");
         foreach (var tile in tiles)
         {
-            var name = Descendants<TextBlock>(tile).Single(t => Equals(t.Tag, "ApplicationName"));
+            var name = Descendants<TextBlock>(tile).Single(t => Equals(t.Tag, "ApplicationName") || Equals(t.Tag, "DesktopItemName"));
             Require(name.ActualHeight + .5 >= name.LineHeight * 2, "The name area cannot hold two text lines.");
             var position = name.TranslatePoint(new Point(0, 0), tile);
             Require(position.Y >= -.5 && position.Y + name.ActualHeight <= tile.ActualHeight + .5, "The name extends outside the tile vertically.");
@@ -623,9 +634,9 @@ internal static class Program
     }
 
     private static UniformGrid ApplicationGrid(DependencyObject window) => Descendants<UniformGrid>(window)
-        .Single(g => g.IsVisible && g.Children.OfType<Button>().Any(b => b.DataContext is AppTileViewModel));
+        .Single(g => g.IsVisible && g.Children.OfType<Button>().Any(b => b.DataContext is AppTileViewModel or DesktopItem));
     private static IEnumerable<TextBlock> Labels(DependencyObject parent) => Descendants<TextBlock>(parent)
-        .Where(t => t.IsVisible && Equals(t.Tag, "ApplicationName"));
+        .Where(t => t.IsVisible && (Equals(t.Tag, "ApplicationName") || Equals(t.Tag, "DesktopItemName")));
     private static T? Ancestor<T>(DependencyObject node) where T : DependencyObject
     {
         for (var parent = VisualTreeHelper.GetParent(node); parent != null; parent = VisualTreeHelper.GetParent(parent))
@@ -646,6 +657,15 @@ internal static class Program
         await Application.Current.Dispatcher.InvokeAsync(() => { }, DispatcherPriority.ApplicationIdle);
         await Task.Delay(50);
         await Application.Current.Dispatcher.InvokeAsync(() => { }, DispatcherPriority.ApplicationIdle);
+    }
+    private static async Task WaitForDesktop(ControlCenterWindow window)
+    {
+        for (var attempt = 0; attempt < 40; attempt++)
+        {
+            await Frame();
+            if (Descendants<Button>(window).Any(button => button.DataContext is DesktopItem)) return;
+        }
+        throw new InvalidOperationException("Desktop fixture did not finish rendering.");
     }
     private static AnimationClock? CaretClock(ControlCenterWindow window)
     {

@@ -62,6 +62,7 @@ WSL 可用于编辑文件，但 Linux 构建结果不能代替 Windows WPF 编�
 | `scripts/test-icon.ps1` | 真实图标、透明通道、自定义来源、缓存更新与回退 | Windows WPF / Shell |
 | `scripts/test-compositor-ui.ps1` | 实时合成、静态切换、已知背景变化与资源停止 | Windows 交互会话 |
 | `scripts/test-windows.ps1` | Shell、真实图标、显示器和窗口身份 | Windows 交互会话 |
+| `scripts/test-desktop.ps1` | 真实桌面目录的隔离夹具：文件与文件夹、新建、重命名、文件复制和事件释放 | Windows |
 | `scripts/test-font.ps1` | 系统图标字体读取与释放 | Windows |
 | `scripts/test-typography-ui.ps1` | 实际 WPF 栏目字体、文字颜色、预览、导航与流光停止 | Windows 交互会话 |
 | `scripts/test-dock-ui.ps1` | Dock 四边与三轮廓、运行胶囊、放大边界、命中、滚动与动画停止 | Windows 交互会话 |
@@ -73,13 +74,22 @@ WSL 可用于编辑文件，但 Linux 构建结果不能代替 Windows WPF 编�
 
 各脚本生成 JSON 报告至 `artifacts/tests`。交互测试不应与性能采样同时运行。测试计数、日期和边界见 [验证记录](validation.md)；不能把编译通过或短测通过写成所有硬件、游戏及长期驻留验收完成。
 
-0.10.3 的批量添加与管理窗口检查可单独运行：
+批量添加与管理窗口检查可单独运行：
 
 ```powershell
 dotnet run --project tests/LumaDock.Importer.Ui.Tests -c Release -- --report artifacts/tests/importer-ui-results.json
 ```
 
 此检查使用 Windows WPF、自有程序与快捷方式文件、隔离配置，覆盖逐项失败、重复、取消、重入、三排布局与添加后的可见结果。它不操作用户原始文件，也不将内部导入入口检查视为原生文件选择器的鼠标全流程。
+
+0.10.4 的桌面文件服务与实际桌面集视图分别检查：
+
+```powershell
+.\scripts\test-desktop.ps1
+dotnet run --project tests/LumaDock.Desktop.Ui.Tests -c Release -- artifacts/tests/desktop-ui-results.json
+```
+
+两组检查在自有临时目录中建立用户桌面、公共桌面与文件夹夹具，覆盖真实文件操作、同名冲突、目录事件和视图生命周期。UI 检查渲染实际 WPF 控件，不修改个人桌面、系统设置或剪贴板，也不启动文件关联程序；不能据此宣称全部 Shell 菜单与关联程序已完成交互验收。
 
 GitHub Actions 使用 Windows runner 构建整个解决方案，执行确定性的 Core/Storage、图像、布局与采样节奏组件测试，并生成便携包。CI 不执行真实交互桌面或性能验收，结果见 [Actions](https://github.com/FouHe0720/LumaDock/actions)。
 
@@ -109,11 +119,15 @@ GitHub Actions 使用 Windows runner 构建整个解决方案，执行确定性�
 
 ```powershell
 & .\artifacts\publish\LumaDock.exe --data-dir .\work\sandbox --diagnostics-dir .\artifacts\diagnostics --show-launchpad
+& .\artifacts\publish\LumaDock.exe --data-dir .\work\desktop-sandbox --diagnostics-dir .\artifacts\desktop-diagnostics --show-desktop
 .\scripts\measure-performance.ps1 -Seconds 60 -WarmupSeconds 20
 .\scripts\measure-performance.ps1 -Seconds 60 -WarmupSeconds 25 -ShowLaunchpad
+.\scripts\measure-performance.ps1 -Seconds 60 -WarmupSeconds 25 -ShowDesktop
 ```
 
-性能脚本创建独立数据目录，采样结束只停止该测试实例。第二条性能命令还需确保应用窗口真正获得前台，并核对 CSV 的 `isForeground`。不要将动态透景开启、关闭、非前台和持续交互混成一个空闲指标。
+`--show-desktop` 直接打开桌面集，`--show-launchpad` 打开应用库。数据目录隔离的是 LumaDock 配置，不改变默认桌面文件来源；普通诊断启动仍会读取真实桌面。自动化文件变更测试使用注入的独立桌面目录，避免作用于个人文件。
+
+性能脚本创建独立数据目录，采样结束只停止该测试实例。`-ShowLaunchpad` 与 `-ShowDesktop` 的前台采样还需确保管理窗口真正获得前台，并核对 CSV 的 `isForeground`。不要将动态透景开启、关闭、非前台和持续交互混成一个空闲指标。
 
 诊断模式可写出程序渲染图和计时；这些产物可能包含屏幕内容，分享前应人工检查。测量方法、CPU 口径、私有工作集与私有提交的区别见 [性能记录](performance.md)。
 

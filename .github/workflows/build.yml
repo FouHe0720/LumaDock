@@ -53,6 +53,9 @@ jobs:
       - name: Test adaptive backdrop cadence
         run: ./scripts/test-cadence.ps1
 
+      - name: Test desktop files with isolated fixtures
+        run: ./scripts/test-desktop.ps1
+
       - name: Publish self-contained Windows package
         run: ./scripts/publish.ps1
 
