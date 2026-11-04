@@ -91,7 +91,17 @@ dotnet run --project tests/LumaDock.Desktop.Ui.Tests -c Release -- artifacts/tes
 
 两组检查在自有临时目录中建立用户桌面、公共桌面与文件夹夹具，覆盖真实文件操作、同名冲突、目录事件和视图生命周期。UI 检查渲染实际 WPF 控件，不修改个人桌面、系统设置或剪贴板，也不启动文件关联程序；不能据此宣称全部 Shell 菜单与关联程序已完成交互验收。
 
-GitHub Actions 使用 Windows runner 构建整个解决方案，执行确定性的 Core/Storage、图像、布局与采样节奏组件测试，并生成便携包。CI 不执行真实交互桌面或性能验收，结果见 [Actions](https://github.com/FouHe0720/LumaDock/actions)。
+0.11.0 增加工作区和 Dock 自由摆放检查：
+
+```powershell
+dotnet run --project tests/LumaDock.Workspace.Ui.Tests -c Release -- artifacts/tests/workspace-ui-results.json
+```
+
+这组测试检查实际 WPF 品牌居中、1120×760 三排、大小窗口与名称字号适应、原生四边四角缩放命中、最小尺寸、最大化和还原。Dock 部分检查握柄与图标的不同命中、自由坐标保存、重建后的定位、失去已选显示器时的可达边界，以及非置顶和无激活样式。若测试成功将自有覆盖窗口设为真实前台，会另检查重定位后的前台层级；请核对报告的 `foregroundCoverVerified`，没有获得真实前台时不计入该专项。定位测试直接调用松手后的命令，不使用鼠标注入；几何夹具也不等于真实混合 DPI 双屏验收。
+
+完整鼠标验收另检查窗口边缘横向、纵向拉伸及最大化后的尺寸还原，再用 Dock 握柄拖到新位置、松手后读取配置，核对固定项未变，最后检查握柄右键菜单。示例与验收结果见[验证记录](validation.md)。运行交互检查时应使用独立配置和自有示例文件，记录实际动作，不能把内部命令调用写成鼠标已经拖动。
+
+GitHub Actions 使用 Windows runner 构建整个解决方案，执行 Core/Storage、图像、布局、采样节奏组件测试及隔离桌面文件服务检查，并生成便携包。CI 不执行真实交互桌面或性能验收，结果见 [Actions](https://github.com/FouHe0720/LumaDock/actions)。
 
 ## 生成便携包
 

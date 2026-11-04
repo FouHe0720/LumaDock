@@ -24,5 +24,6 @@
     <Project Path="tests/LumaDock.Ui.Tests/LumaDock.Ui.Tests.csproj" />
     <Project Path="tests/LumaDock.Wallpaper.Tests/LumaDock.Wallpaper.Tests.csproj" />
     <Project Path="tests/LumaDock.Windows.Tests/LumaDock.Windows.Tests.csproj" />
+    <Project Path="tests/LumaDock.Workspace.Ui.Tests/LumaDock.Workspace.Ui.Tests.csproj" />
   </Folder>
 </Solution>

@@ -28,6 +28,7 @@ public sealed class DockWindow : Window
     private readonly ScrollViewer scroll = new() { HorizontalScrollBarVisibility = ScrollBarVisibility.Hidden, VerticalScrollBarVisibility = ScrollBarVisibility.Disabled, CanContentScroll = false };
     private readonly Canvas dropOverlay = new() { IsHitTestVisible = false };
     private readonly Border insertionCue = new() { CornerRadius = new CornerRadius(2), Visibility = Visibility.Collapsed, BorderThickness = new Thickness(1) };
+    private readonly Border positionGrip = new() { Width = 12, Height = 28, CornerRadius = new CornerRadius(6), Background = Brushes.Transparent, Opacity = .55 };
     private sealed class Tile
     {
         public AppEntry? App; public IReadOnlyList<AppEntry> Variants = []; public required Button Button; public required FrameworkElement Visual;
@@ -43,12 +44,17 @@ public sealed class DockWindow : Window
     private double bodyThickness, flight, endReserve, radius;
     private readonly DispatcherTimer hideDelay = new() { Interval = TimeSpan.FromMilliseconds(650) };
     private bool tucked, dragging, rebuilding, rebuildAfterDrag, closed;
+    private bool positionDragging;
+    private DockFrame? positionDragOrigin;
     private Point dragStart;
     private IntPtr handle;
     private HwndSource? source;
     private int generation;
     private double fullWidth, fullHeight;
     private bool Vertical => controller.State.Settings.Position is "Left" or "Right";
+    private bool FreePlacement => controller.State.Settings.DockPlacement == "Free";
+    private bool AutoHideEnabled => controller.State.Settings.AutoHide && !FreePlacement;
+    public bool IsPositionDragging => positionDragging;
 
     public DockWindow(AppController controller)
     {
@@ -62,6 +68,10 @@ public sealed class DockWindow : Window
         UseLayoutRounding = true; SnapsToDevicePixels = true;
         scroll.Content = items;
         body.Children.Add(liquid); body.Children.Add(tint); body.Children.Add(highlight);
+        var gripMark = new Border { Width = 3, Height = 16, CornerRadius = new CornerRadius(1.5), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
+        gripMark.SetResourceReference(Border.BackgroundProperty, "CaptionBrush"); positionGrip.Child = gripMark;
+        positionGrip.ToolTip = "拖动握柄或空白处，自由摆放 Dock；双击恢复底部居中";
+        AutomationProperties.SetName(positionGrip, "拖动 Dock"); body.Children.Add(positionGrip);
         dropOverlay.Children.Add(insertionCue);
         var surface = new Grid(); surface.Children.Add(plate); surface.Children.Add(body); surface.Children.Add(finish); surface.Children.Add(scroll); surface.Children.Add(dropOverlay); Content = surface;
         body.SizeChanged += (_, _) => UpdateContour();
@@ -74,7 +84,7 @@ public sealed class DockWindow : Window
         DragLeave += (_, e) => { var p = e.GetPosition(this); if (p.X <= 0 || p.Y <= 0 || p.X >= ActualWidth || p.Y >= ActualHeight) ClearInsertion(); };
         MouseMove += Magnify;
         MouseEnter += (_, _) => { hideDelay.Stop(); Reveal(); };
-        MouseLeave += (_, _) => { lastPointer = new(double.NaN, double.NaN); highlight.ReleasePointer(); ResetMagnification(); if (controller.State.Settings.AutoHide) hideDelay.Start(); };
+        MouseLeave += (_, _) => { lastPointer = new(double.NaN, double.NaN); highlight.ReleasePointer(); if (positionDragging) StopHover(); else ResetMagnification(); if (AutoHideEnabled && !positionDragging) hideDelay.Start(); };
         IsVisibleChanged += (_, _) => { if (!IsVisible) StopHover(); };
         hideDelay.Tick += HideTick;
         SourceInitialized += (_, _) =>
@@ -83,21 +93,129 @@ public sealed class DockWindow : Window
             NativeWindowHelper.ConfigureDock(handle);
             source = HwndSource.FromHwnd(handle); source?.AddHook(WndProc);
         };
-        Loaded += (_, _) => { UpdateSettings(); if (controller.State.Settings.AutoHide) hideDelay.Start(); };
+        Loaded += (_, _) => { UpdateSettings(); if (AutoHideEnabled) hideDelay.Start(); };
         ContentRendered += (_, _) => controller.RecordDockFrame();
-        Closed += (_, _) => { closed = true; ClearInsertion(); StopHover(); hover.Tick -= HoverTick; highlight.StopMotion(); hideDelay.Stop(); hideDelay.Tick -= HideTick; source?.RemoveHook(WndProc); generation++; };
-        ContextMenu = new ContextMenu();
+        Closed += (_, _) => { closed = true; positionDragging = false; positionDragOrigin = null; ClearInsertion(); StopHover(); hover.Tick -= HoverTick; highlight.StopMotion(); hideDelay.Stop(); hideDelay.Tick -= HideTick; source?.RemoveHook(WndProc); generation++; };
+        ContextMenu = DockMenu();
         ContextMenu.Closed += (_, _) => ScheduleHide();
         AddMenu(ContextMenu, "打开应用", () => controller.ShowCenter());
         AddMenu(ContextMenu, "添加应用…", AddFile);
+        AddMenu(ContextMenu, "恢复底部居中", RestoreBottomPlacement);
+        ContextMenu.Items.Add(new MenuItem { Header = "拖动握柄或空白处，自由摆放", IsEnabled = false });
         AddMenu(ContextMenu, "偏好设置", () => controller.ShowCenter("Settings"));
         AddMenu(ContextMenu, "退出 LumaDock", controller.Exit);
     }
 
     private IntPtr WndProc(IntPtr hwnd, int msg, IntPtr w, IntPtr l, ref bool handled)
     {
-        if (msg == 0x2E0) Dispatcher.BeginInvoke(() => { Rebuild(); liquid.Refresh(); });
+        if (msg == 0x0084 /* WM_NCHITTEST */ && !dragging && !tucked)
+        {
+            var value = l.ToInt64();
+            var point = PointFromScreen(new Point(unchecked((short)(value & 0xFFFF)), unchecked((short)((value >> 16) & 0xFFFF))));
+            if (IsPositionDragPoint(point)) { handled = true; return new IntPtr(2); /* HTCAPTION: the OS owns drag threshold/capture. */ }
+        }
+        if (msg == 0x0021 /* WM_MOUSEACTIVATE */) { handled = true; return new IntPtr(3); /* MA_NOACTIVATE. */ }
+        if (msg == 0x00A3 /* WM_NCLBUTTONDBLCLK */ && w.ToInt32() == 2) { RestoreBottomPlacement(); handled = true; return IntPtr.Zero; }
+        if (msg is 0x00A4 or 0x00A5 /* Non-client right click on a drag surface. */ && w.ToInt32() == 2)
+        {
+            if (msg == 0x00A5 && ContextMenu is { } menu)
+            {
+                var packed = l.ToInt64();
+                var point = PointFromScreen(new Point(unchecked((short)(packed & 0xffff)), unchecked((short)((packed >> 16) & 0xffff))));
+                menu.PlacementTarget = this; menu.Placement = PlacementMode.RelativePoint;
+                menu.HorizontalOffset = point.X; menu.VerticalOffset = point.Y; menu.IsOpen = true;
+            }
+            handled = true; return IntPtr.Zero;
+        }
+        if (msg == 0x0231 /* WM_ENTERSIZEMOVE */)
+        {
+            positionDragging = true; positionDragOrigin = WindowFrame();
+            hideDelay.Stop(); StopHover(); highlight.StopMotion(); ClearInsertion();
+            NativeWindowHelper.ApplyDockLayer(handle);
+        }
+        if (msg == 0x0216 /* WM_MOVING */ && positionDragging && l != IntPtr.Zero)
+        {
+            var rect = Marshal.PtrToStructure<Native.Rect>(l);
+            var proposed = new DockFrame(rect.Left, rect.Top, rect.Right - rect.Left, rect.Bottom - rect.Top);
+            var monitor = MonitorForFrame(proposed);
+            if (monitor != null)
+            {
+                var frame = DockPlacementGeometry.Clamp(WorkArea(monitor), proposed, PlacementInset());
+                Marshal.StructureToPtr(new Native.Rect { Left = frame.X, Top = frame.Y, Right = frame.X + frame.Width, Bottom = frame.Y + frame.Height }, l, false);
+            }
+            NativeWindowHelper.ApplyDockLayer(handle);
+            handled = true; return new IntPtr(1);
+        }
+        if (msg == 0x0232 /* WM_EXITSIZEMOVE */ && positionDragging)
+        {
+            var frame = WindowFrame(); var origin = positionDragOrigin;
+            var destinationMonitor = frame is { } finalFrame ? MonitorForFrame(finalFrame) : null;
+            positionDragging = false; positionDragOrigin = null;
+            Dispatcher.BeginInvoke(DispatcherPriority.Background, () =>
+            {
+                if (closed) return;
+                var pending = rebuildAfterDrag; rebuildAfterDrag = false;
+                // Escape and a click without an actual move retain the previous placement.
+                if (frame is { } moved && origin is { } before && (Math.Abs(moved.X - before.X) > 2 || Math.Abs(moved.Y - before.Y) > 2))
+                {
+                    if (destinationMonitor is { } monitor) CommitFreePlacement(moved, monitor);
+                }
+                else if (pending) Rebuild();
+                NativeWindowHelper.ApplyDockLayer(handle); liquid.Refresh(); ScheduleHide();
+            });
+        }
+        if (msg == 0x2E0) Dispatcher.BeginInvoke(() => { if (positionDragging) { rebuildAfterDrag = true; return; } Rebuild(); liquid.Refresh(); });
         return IntPtr.Zero;
+    }
+
+    private static ContextMenu DockMenu()
+    {
+        var menu = new ContextMenu { Style = Center.CenterStyles.DesktopMenuStyle() };
+        menu.Resources[typeof(MenuItem)] = Center.CenterStyles.DesktopMenuItemStyle();
+        return menu;
+    }
+
+    private bool IsPositionDragPoint(Point point)
+    {
+        if (closed || positionDragging || !IsVisible || !double.IsFinite(point.X) || !double.IsFinite(point.Y)) return false;
+        var local = new Point(point.X - body.Margin.Left, point.Y - body.Margin.Top);
+        if (local.X < 0 || local.Y < 0 || local.X >= body.ActualWidth || local.Y >= body.ActualHeight || body.Clip?.FillContains(local) == false) return false;
+        for (DependencyObject? element = InputHitTest(point) as DependencyObject; element != null;)
+        {
+            if (element is Button) return false; // Application buttons retain their own launch/reorder drag gesture.
+            element = element is FrameworkContentElement content ? content.Parent : VisualTreeHelper.GetParent(element);
+        }
+        return true;
+    }
+
+    private DockFrame? WindowFrame() => Native.GetWindowRect(handle, out var rect) ? new(rect.Left, rect.Top, rect.Right - rect.Left, rect.Bottom - rect.Top) : null;
+    private int PlacementInset() => Math.Max(2, (int)Math.Ceiling(Native.GetDpiForWindow(handle) / 96d * 4));
+    private static DockWorkArea WorkArea(MonitorInfo monitor) => new(monitor.WorkLeft, monitor.WorkTop, monitor.WorkWidth, monitor.WorkHeight);
+    private static MonitorInfo? MonitorForFrame(DockFrame frame)
+    {
+        var monitors = MonitorService.GetMonitors();
+        var x = frame.X + frame.Width / 2; var y = frame.Y + frame.Height / 2;
+        if (Native.GetCursorPos(out var pointer)) { x = pointer.X; y = pointer.Y; }
+        return monitors.OrderBy(m => Math.Pow(x - Math.Clamp(x, m.Left, m.Left + m.Width), 2) + Math.Pow(y - Math.Clamp(y, m.Top, m.Top + m.Height), 2)).ThenByDescending(m => m.IsPrimary).FirstOrDefault();
+    }
+
+    private void CommitFreePlacement(DockFrame frame, MonitorInfo monitor)
+    {
+        var anchor = DockPlacementGeometry.AnchorFor(WorkArea(monitor), frame, PlacementInset());
+        var settings = controller.State.Settings;
+        settings.DockPlacement = "Free"; settings.MonitorDevice = monitor.DeviceName;
+        settings.DockFreeX = anchor.X; settings.DockFreeY = anchor.Y;
+        hideDelay.Stop(); controller.Save();
+    }
+
+    public void RestoreBottomPlacement()
+    {
+        if (closed || positionDragging) return;
+        controller.State.Settings.DockPlacement = "Edge";
+        controller.State.Settings.Position = "Bottom";
+        controller.State.Settings.DockFreeX = .5;
+        controller.State.Settings.DockFreeY = 1;
+        controller.Save(); ScheduleHide();
     }
 
     public void UpdateSettings()
@@ -118,14 +236,14 @@ public sealed class DockWindow : Window
         tucked = false; scroll.Visibility = Visibility.Visible; body.Visibility = Visibility.Visible; finish.Visibility = Visibility.Visible;
         highlight.Visibility = Visibility.Visible;
         Rebuild();
-        if (controller.State.Settings.AutoHide && !IsMouseOver) hideDelay.Start(); else hideDelay.Stop();
+        if (AutoHideEnabled && !IsMouseOver) hideDelay.Start(); else hideDelay.Stop();
         liquid.Refresh();
     }
 
     public void Rebuild()
     {
         if (closed) return;
-        if (dragging) { rebuildAfterDrag = true; return; }
+        if (dragging || positionDragging) { rebuildAfterDrag = true; return; }
         if (rebuilding) return;
         rebuilding = true;
         try
@@ -162,7 +280,7 @@ public sealed class DockWindow : Window
                 button.Click += (_, _) => controller.Launch(app);
                 button.PreviewMouseLeftButtonDown += (_, e) => dragStart = e.GetPosition(this);
                 button.PreviewMouseMove += (_, e) => BeginReorder(button, app, e);
-                button.ContextMenu = new ContextMenu();
+                button.ContextMenu = DockMenu();
                 button.ContextMenu.Closed += (_, _) => ScheduleHide();
                 AddMenu(button.ContextMenu, "打开 / 切换到应用", () => controller.Launch(app));
                 if (group.Entries.Count > 1)
@@ -316,8 +434,10 @@ public sealed class DockWindow : Window
     public void Reposition()
     {
         if (handle == IntPtr.Zero) return;
+        if (positionDragging) { rebuildAfterDrag = true; return; }
         var monitors = MonitorService.GetMonitors();
-        var monitor = monitors.FirstOrDefault(m => m.DeviceName == controller.State.Settings.MonitorDevice) ?? monitors.FirstOrDefault(m => m.IsPrimary) ?? monitors.First();
+        var monitor = monitors.FirstOrDefault(m => m.DeviceName == controller.State.Settings.MonitorDevice) ?? monitors.FirstOrDefault(m => m.IsPrimary) ?? monitors.FirstOrDefault();
+        if (monitor == null) return;
         var dpi = Native.GetDpiForWindow(handle) / 96.0; if (dpi < .5) dpi = 1;
         var s = controller.State.Settings;
         var length = tiles.Count * (s.IconSize + s.Spacing + 12) + (tiles.Count > 1 ? 19 : 0) + 28 + endReserve * 2;
@@ -335,6 +455,11 @@ public sealed class DockWindow : Window
             _ => new Thickness(endReserve, flight, endReserve, 12)
         };
         body.Margin = plate.Margin = finish.Margin = margin;
+        positionGrip.Width = Vertical ? 28 : 12; positionGrip.Height = Vertical ? 12 : 28;
+        positionGrip.HorizontalAlignment = Vertical ? HorizontalAlignment.Center : HorizontalAlignment.Left;
+        positionGrip.VerticalAlignment = Vertical ? VerticalAlignment.Top : VerticalAlignment.Center;
+        positionGrip.Margin = Vertical ? new Thickness(0, 3, 0, 0) : new Thickness(3, 0, 0, 0);
+        if (positionGrip.Child is Border mark) { mark.Width = Vertical ? 16 : 3; mark.Height = Vertical ? 3 : 16; }
         items.Margin = tucked ? new Thickness(0) : Vertical ? new Thickness(0, endReserve + 14, 0, endReserve + 14) : new Thickness(endReserve + 14, 0, endReserve + 14, 0);
         foreach (var layer in new[] { plate, finish })
         {
@@ -349,6 +474,11 @@ public sealed class DockWindow : Window
         if (s.Position == "Top") y = monitor.WorkTop + gap;
         if (s.Position == "Left") { x = monitor.WorkLeft + gap; y = monitor.WorkTop + (monitor.WorkHeight - h) / 2; }
         if (s.Position == "Right") { x = monitor.WorkLeft + monitor.WorkWidth - w - gap; y = monitor.WorkTop + (monitor.WorkHeight - h) / 2; }
+        if (FreePlacement)
+        {
+            var frame = DockPlacementGeometry.Resolve(WorkArea(monitor), w, h, s.DockFreeX, s.DockFreeY, PlacementInset());
+            x = frame.X; y = frame.Y; w = frame.Width; h = frame.Height;
+        }
         NativeWindowHelper.SetPosition(handle, x, y, w, h);
         NativeWindowHelper.ApplyDockLayer(handle);
     }
@@ -364,10 +494,10 @@ public sealed class DockWindow : Window
     private void HideTick(object? sender, EventArgs e)
     {
         hideDelay.Stop();
-        if (IsMouseOver || dragging || ContextMenu?.IsOpen == true || tiles.Any(t => t.Button.ContextMenu?.IsOpen == true) || !controller.State.Settings.AutoHide) return;
+        if (IsMouseOver || dragging || positionDragging || ContextMenu?.IsOpen == true || tiles.Any(t => t.Button.ContextMenu?.IsOpen == true) || !AutoHideEnabled) return;
         tucked = true; StopHover(); highlight.StopMotion(); scroll.Visibility = Visibility.Collapsed; body.Visibility = Visibility.Collapsed; finish.Visibility = Visibility.Collapsed; Reposition();
     }
-    private void ScheduleHide() { if (!closed && IsVisible && controller.State.Settings.AutoHide && !IsMouseOver) hideDelay.Start(); }
+    private void ScheduleHide() { if (!closed && IsVisible && AutoHideEnabled && !IsMouseOver && !positionDragging) hideDelay.Start(); }
     private void Reveal()
     {
         if (!tucked) return;
@@ -376,8 +506,9 @@ public sealed class DockWindow : Window
 
     private void Magnify(object sender, MouseEventArgs e)
     {
+        if (positionDragging) return;
         if (!controller.ReducedMotion) highlight.TrackPointer(e.GetPosition(highlight));
-        if (controller.ReducedMotion || tucked || dragging) return;
+        if (controller.ReducedMotion || tucked || dragging || positionDragging) return;
         var p = e.GetPosition(items);
         if (double.IsFinite(lastPointer.X) && Math.Abs(p.X - lastPointer.X) < .25 && Math.Abs(p.Y - lastPointer.Y) < .25) return;
         lastPointer = p; SetTargets(p);
@@ -563,5 +694,12 @@ public sealed class DockWindow : Window
         var encoder = new PngBitmapEncoder(); encoder.Frames.Add(BitmapFrame.Create(bitmap));
         using var output = File.Create(path); encoder.Save(output);
     }
-    private static class Native { [DllImport("user32.dll")] internal static extern uint GetDpiForWindow(IntPtr hwnd); }
+    private static class Native
+    {
+        [StructLayout(LayoutKind.Sequential)] internal struct Rect { public int Left, Top, Right, Bottom; }
+        [StructLayout(LayoutKind.Sequential)] internal struct ScreenPoint { public int X, Y; }
+        [DllImport("user32.dll")] internal static extern uint GetDpiForWindow(IntPtr hwnd);
+        [DllImport("user32.dll")] [return: MarshalAs(UnmanagedType.Bool)] internal static extern bool GetWindowRect(IntPtr hwnd, out Rect rect);
+        [DllImport("user32.dll")] [return: MarshalAs(UnmanagedType.Bool)] internal static extern bool GetCursorPos(out ScreenPoint point);
+    }
 }

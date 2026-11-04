@@ -204,6 +204,9 @@ public static class Catalog
         // Family names only: imported configuration must not turn a font choice into a URI.
         if (s.NameFontFamily.Length > 80 || s.NameFontFamily.Any(c => char.IsControl(c) || c is ':' or '/' or '\\' or '#')) s.NameFontFamily = "";
         if (!new[] { "Bottom", "Top", "Left", "Right" }.Contains(s.Position)) s.Position = "Bottom";
+        if (!new[] { "Edge", "Free" }.Contains(s.DockPlacement)) s.DockPlacement = "Edge";
+        s.DockFreeX = double.IsFinite(s.DockFreeX) ? Math.Clamp(s.DockFreeX, 0, 1) : .5;
+        s.DockFreeY = double.IsFinite(s.DockFreeY) ? Math.Clamp(s.DockFreeY, 0, 1) : 1;
         if (!new[] { "System", "Light", "Dark" }.Contains(s.Theme)) s.Theme = "System";
     }
 

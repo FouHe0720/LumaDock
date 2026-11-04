@@ -99,6 +99,7 @@ public static class WindowBackdrop
         {
             // WindowChrome finishes native setup after SourceInitialized.
             // Apply the selected composition policy after that initial setup.
+            source?.RemoveHook(Hook); source?.AddHook(Hook);
             hasApplied = false; Apply(isDark(), powerSaver());
         }
 
@@ -185,6 +186,33 @@ public static class WindowBackdrop
 
         private IntPtr Hook(IntPtr hwnd, int message, IntPtr wParam, IntPtr lParam, ref bool handled)
         {
+            if (message == 0x0084 && window.WindowState == WindowState.Maximized
+                && window.ResizeMode is ResizeMode.CanResize or ResizeMode.CanResizeWithGrip)
+            { handled = true; return new IntPtr(1); }
+            // Clear extended frames can suppress the normal non-client border.
+            // Return native sizing zones explicitly, leaving the rest of the
+            // client and all caption-button input to WPF/WindowChrome.
+            if (message == 0x0084 /* WM_NCHITTEST */ && window.WindowState == WindowState.Normal
+                && window.ResizeMode is ResizeMode.CanResize or ResizeMode.CanResizeWithGrip && GetWindowRect(hwnd, out var rect))
+            {
+                var packed = lParam.ToInt64();
+                var x = (int)(short)(packed & 0xffff); var y = (int)(short)((packed >> 16) & 0xffff);
+                var scale = Math.Max(1, GetDpiForWindow(hwnd)) / 96d;
+                var border = Math.Max(6, (int)Math.Ceiling(8 * scale));
+                var corner = Math.Max(border, (int)Math.Ceiling(16 * scale));
+                var inside = x >= rect.Left && x < rect.Right && y >= rect.Top && y < rect.Bottom;
+                if (inside)
+                {
+                    var left = x < rect.Left + border; var right = x >= rect.Right - border;
+                    var top = y < rect.Top + border; var bottom = y >= rect.Bottom - border;
+                    var nearLeft = x < rect.Left + corner; var nearRight = x >= rect.Right - corner;
+                    var nearTop = y < rect.Top + corner; var nearBottom = y >= rect.Bottom - corner;
+                    var hit = (left && nearTop || top && nearLeft) ? 13 : (right && nearTop || top && nearRight) ? 14
+                        : (left && nearBottom || bottom && nearLeft) ? 16 : (right && nearBottom || bottom && nearRight) ? 17
+                        : left ? 10 : right ? 11 : top ? 12 : bottom ? 15 : 0;
+                    if (hit != 0) { handled = true; return new IntPtr(hit); }
+                }
+            }
             if (message == 0x0024 /* WM_GETMINMAXINFO */)
             {
                 var monitor = MonitorFromWindow(hwnd, 2);
@@ -194,6 +222,8 @@ public static class WindowBackdrop
                     var limits = Marshal.PtrToStructure<MinMaxInfo>(lParam);
                     limits.MaxPosition = new NativePoint { X = info.Work.Left - info.Monitor.Left, Y = info.Work.Top - info.Monitor.Top };
                     limits.MaxSize = new NativePoint { X = info.Work.Right - info.Work.Left, Y = info.Work.Bottom - info.Work.Top };
+                    var scale = Math.Max(1, GetDpiForWindow(hwnd)) / 96d;
+                    limits.MinTrackSize = new NativePoint { X = (int)Math.Ceiling(window.MinWidth * scale), Y = (int)Math.Ceiling(window.MinHeight * scale) };
                     Marshal.StructureToPtr(limits, lParam, false);
                     handled = true;
                 }
@@ -279,6 +309,8 @@ public static class WindowBackdrop
     [DllImport("user32.dll")] private static extern IntPtr MonitorFromWindow(IntPtr hwnd, uint flags);
     [DllImport("user32.dll")] private static extern bool GetMonitorInfo(IntPtr monitor, ref MonitorInfo info);
     [StructLayout(LayoutKind.Sequential)] private struct Rect { public int Left, Top, Right, Bottom; }
+    [DllImport("user32.dll")] private static extern uint GetDpiForWindow(IntPtr hwnd);
+    [DllImport("user32.dll")] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool GetWindowRect(IntPtr hwnd, out Rect rect);
     [StructLayout(LayoutKind.Sequential)] private struct MonitorInfo { public int Size; public Rect Monitor, Work; public uint Flags; }
     [DllImport("kernel32.dll")] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool GetSystemPowerStatus(out PowerStatus status);
     [DllImport("wtsapi32.dll")] [return: MarshalAs(UnmanagedType.Bool)] private static extern bool WTSRegisterSessionNotification(IntPtr hwnd, uint flags);

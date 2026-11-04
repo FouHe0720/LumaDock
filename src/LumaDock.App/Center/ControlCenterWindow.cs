@@ -98,7 +98,7 @@ public sealed partial class ControlCenterWindow : Window
         _section = NormalizeSection(section);
         Title = "LumaDock";
         Icon = BrandArtwork.Value;
-        Width = 1120; Height = 760; MinWidth = 900; MinHeight = 600;
+        Width = 1160; Height = 800; MinWidth = 900; MinHeight = 600;
         WindowStartupLocation = WindowStartupLocation.CenterScreen;
         WindowStyle = WindowStyle.None;
         ResizeMode = ResizeMode.CanResize;
@@ -178,22 +178,14 @@ public sealed partial class ControlCenterWindow : Window
         };
         layers.Children.Add(_liquid); layers.Children.Add(reflection); layers.Children.Add(_frame); layers.Children.Add(_glassRim);
         _shell.Child = layers; Content = _shell;
-        _frame.RowDefinitions.Add(new RowDefinition { Height = new GridLength(62) });
+        _frame.RowDefinitions.Add(new RowDefinition { Height = new GridLength(112) });
         _frame.RowDefinitions.Add(new RowDefinition());
-        _frame.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(178) });
+        _frame.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(196) });
         _frame.ColumnDefinitions.Add(new ColumnDefinition());
-        var header = new Grid { Margin = new Thickness(24, 0, 16, 0), Background = Brushes.Transparent };
+        var header = BuildBrandHeader();
         Grid.SetColumnSpan(header, 2); _frame.Children.Add(header);
-        header.MouseLeftButtonDown += (_, e) => { if (e.ClickCount == 2) WindowState = WindowState == WindowState.Maximized ? WindowState.Normal : WindowState.Maximized; else if (e.ButtonState == MouseButtonState.Pressed) DragMove(); };
-        var brand = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
-        var logo = new Image { Width = 29, Height = 29, Source = Icon, Margin = new Thickness(0, 0, 10, 0) };
-        brand.Children.Add(logo); brand.Children.Add(Text("LumaDock", 15, FontWeights.SemiBold));
-        header.Children.Add(brand);
-        var chrome = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Center };
-        chrome.Children.Add(ChromeButton("\uE921", "最小化", () => WindowState = WindowState.Minimized));
-        chrome.Children.Add(ChromeButton("\uE8BB", "关闭", () => Close())); header.Children.Add(chrome);
-        var sideBorder = new Border { BorderThickness = new Thickness(0, .5, .5, 0), Padding = new Thickness(10, 21, 10, 22), CornerRadius = new CornerRadius(0, 0, 0, 24) };
-        sideBorder.SetResourceReference(Border.BorderBrushProperty, "BorderBrush"); sideBorder.SetResourceReference(Border.BackgroundProperty, "SidebarBrush");
+        var sideBorder = new Border { BorderThickness = new Thickness(.65), Padding = new Thickness(8, 18, 8, 14), Margin = new Thickness(14, 5, 0, 18), CornerRadius = new CornerRadius(20) };
+        sideBorder.SetResourceReference(Border.BorderBrushProperty, "GlassHighlightBrush"); sideBorder.SetResourceReference(Border.BackgroundProperty, "SidebarBrush");
         Grid.SetRow(sideBorder, 1); _frame.Children.Add(sideBorder);
         var sideGrid = new Grid(); sideGrid.RowDefinitions.Add(new RowDefinition()); sideGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         sideBorder.Child = sideGrid;
@@ -204,10 +196,10 @@ public sealed partial class ControlCenterWindow : Window
         var keys = Text("Ctrl + Alt + Space", 10, FontWeights.Normal, true); keys.Margin = new Thickness(0, 4, 0, 0); shortcut.Children.Add(keys);
         var shortcutCard = ActionButton("快速打开应用库 · Ctrl + Alt + Space", () => Navigate("Launchpad")); shortcutCard.Content = shortcut;
         shortcutCard.ToolTip = "按 Ctrl + Alt + Space，可从其他应用快速打开应用库"; shortcutCard.Tag = "QuickLaunchHint";
-        shortcutCard.Padding = new Thickness(9, 8, 9, 8); shortcutCard.Margin = new Thickness(7, 0, 7, 11); shortcutCard.HorizontalContentAlignment = HorizontalAlignment.Left;
+        shortcutCard.Padding = new Thickness(10, 9, 10, 9); shortcutCard.Margin = new Thickness(3, 0, 3, 10); shortcutCard.HorizontalContentAlignment = HorizontalAlignment.Left;
         shortcutCard.SetResourceReference(BackgroundProperty, "CardBrush"); footer.Children.Add(shortcutCard);
-        var version = Text("v" + (typeof(AppController).Assembly.GetName().Version?.ToString(3) ?? "0.10.0"), 10, FontWeights.Normal, true); version.Margin = new Thickness(16, 0, 0, 0); footer.Children.Add(version);
-        _body.Margin = new Thickness(38, 24, 38, 24);
+        var version = Text("v" + (typeof(AppController).Assembly.GetName().Version?.ToString(3) ?? "0.11.0"), 10, FontWeights.Normal, true); version.Margin = new Thickness(14, 0, 0, 0); footer.Children.Add(version);
+        _body.Margin = new Thickness(28, 8, 30, 16);
         Grid.SetRow(_body, 1); Grid.SetColumn(_body, 1); _frame.Children.Add(_body);
         _body.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         _body.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
@@ -239,17 +231,17 @@ public sealed partial class ControlCenterWindow : Window
         BuildSidebar(); _body.Children.Clear();
         _title = new(); _subtitle = new() { Visibility = Visibility.Collapsed };
         _tools = new() { Orientation = Orientation.Horizontal };
-        _categories = new() { Margin = new Thickness(0, 0, 0, 10) };
-        var heading = new Grid { Margin = new Thickness(0, 0, 0, 15) };
+        _categories = new() { Margin = new Thickness(0, 0, 0, 4) };
+        var heading = new Grid { Margin = new Thickness(0, 0, 0, 8) };
         heading.ColumnDefinitions.Add(new ColumnDefinition()); heading.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        var words = new StackPanel(); _title.FontSize = 28; _title.TextTrimming = TextTrimming.CharacterEllipsis; _title.SetResourceReference(TextBlock.FontWeightProperty, "UiEmphasisWeight"); _title.SetResourceReference(TextBlock.FontFamilyProperty, "UiTextFamily");
+        var words = new StackPanel(); _title.FontSize = 26; _title.TextTrimming = TextTrimming.CharacterEllipsis; _title.SetResourceReference(TextBlock.FontWeightProperty, "UiEmphasisWeight"); _title.SetResourceReference(TextBlock.FontFamilyProperty, "UiTextFamily");
         _title.Tag = "PageHeading";
         _subtitle.SetResourceReference(TextBlock.ForegroundProperty, "MutedBrush"); _subtitle.FontSize = 12;
         words.Children.Add(_title); words.Children.Add(_subtitle); heading.Children.Add(words);
-        var toolRail = new Border { CornerRadius = new CornerRadius(10, 19, 10, 19), Padding = new Thickness(3), Margin = new Thickness(18, 0, 0, 0), BorderThickness = new Thickness(.6), VerticalAlignment = VerticalAlignment.Center, Child = _tools };
+        var toolRail = new Border { CornerRadius = new CornerRadius(20), Padding = new Thickness(3), Margin = new Thickness(18, 0, 0, 0), BorderThickness = new Thickness(.6), VerticalAlignment = VerticalAlignment.Center, Child = _tools };
         toolRail.SetResourceReference(Border.BackgroundProperty, "CardBrush"); toolRail.SetResourceReference(Border.BorderBrushProperty, "GlassHighlightBrush");
         Grid.SetColumn(toolRail, 1); heading.Children.Add(toolRail); _body.Children.Add(heading);
-        _status.SetResourceReference(TextBlock.ForegroundProperty, "MutedBrush"); _status.FontSize = 10.5; _status.Margin = new Thickness(0, 15, 0, 0); Grid.SetRow(_status, 3); _body.Children.Add(_status);
+        _status.SetResourceReference(TextBlock.ForegroundProperty, "MutedBrush"); _status.FontSize = 10.5; _status.Margin = new Thickness(0, 10, 0, 0); Grid.SetRow(_status, 3); _body.Children.Add(_status);
         switch (_section)
         {
             case "Settings": BuildSettings(); break;
@@ -274,14 +266,14 @@ public sealed partial class ControlCenterWindow : Window
         }
         var add = ActionButton("新建栏目", CreateCategory); add.Margin = new Thickness(7, 2, 7, 0);
         add.HorizontalAlignment = HorizontalAlignment.Stretch; _sidebar.Children.Add(add);
-        var divider = new Border { Height = .5, Margin = new Thickness(16, 16, 16, 19) }; divider.SetResourceReference(Border.BackgroundProperty, "BorderBrush"); _sidebar.Children.Add(divider);
+        var divider = new Border { Height = .5, Margin = new Thickness(14, 16, 14, 17) }; divider.SetResourceReference(Border.BackgroundProperty, "BorderBrush"); _sidebar.Children.Add(divider);
         AddNavCaption("选项");
         AddNav("Settings", "\uE713", "偏好设置"); AddNav("About", "\uE946", "关于");
     }
 
     private void AddNavCaption(string label)
     {
-        var caption = Text(label, 10, FontWeights.Medium, true); caption.Margin = new Thickness(16, 0, 0, 12);
+        var caption = Text(label, 10, FontWeights.Medium, true); caption.Margin = new Thickness(14, 0, 0, 10);
         caption.SetResourceReference(TextBlock.ForegroundProperty, "CaptionBrush"); _sidebar.Children.Add(caption);
     }
 
@@ -294,14 +286,14 @@ public sealed partial class ControlCenterWindow : Window
         spine.SetResourceReference(Border.BackgroundProperty, "AccentBrush"); content.Children.Add(spine);
         var icon = Glyph(glyph, 14); icon.HorizontalAlignment = HorizontalAlignment.Center;
         icon.SetResourceReference(TextBlock.ForegroundProperty, selected ? "AccentBrush" : "MutedBrush");
-        var badge = new Border { Width = 28, Height = 28, CornerRadius = new CornerRadius(8, 12, 8, 12), HorizontalAlignment = HorizontalAlignment.Left, Child = icon };
+        var badge = new Border { Width = 28, Height = 28, CornerRadius = new CornerRadius(9), HorizontalAlignment = HorizontalAlignment.Left, Child = icon };
         badge.SetResourceReference(Border.BackgroundProperty, selected ? "AccentSoftBrush" : "CardBrush"); Grid.SetColumn(badge, 1); content.Children.Add(badge);
         var name = Text(label, 13, selected ? FontWeights.SemiBold : FontWeights.Normal); name.Tag = "NavigationLabel"; name.VerticalAlignment = VerticalAlignment.Center; name.TextTrimming = TextTrimming.CharacterEllipsis; Grid.SetColumn(name, 2); content.Children.Add(name); button.Content = content;
         button.Tag = category == null ? "Navigation:" + section : "CategoryNavigation:" + category;
         if (category != null) button.ToolTip = category + "\n右键可重命名或删除栏目";
         System.Windows.Automation.AutomationProperties.SetName(button, label);
-        button.HorizontalContentAlignment = HorizontalAlignment.Left; button.Padding = new Thickness(9, 9, 10, 9); button.Margin = new Thickness(0, 0, 0, 8); button.Background = Brushes.Transparent; button.BorderBrush = Brushes.Transparent;
-        ApplyButtonTemplate(button, new CornerRadius(11, 20, 20, 11), navigation: true);
+        button.HorizontalContentAlignment = HorizontalAlignment.Left; button.Padding = new Thickness(9, 8, 10, 8); button.Margin = new Thickness(0, 0, 0, 7); button.Background = Brushes.Transparent; button.BorderBrush = Brushes.Transparent;
+        ApplyButtonTemplate(button, new CornerRadius(13), navigation: true);
         if (selected) { button.SetResourceReference(BackgroundProperty, "SelectionBrush"); button.SetResourceReference(BorderBrushProperty, "GlassHighlightBrush"); }
         _sidebar.Children.Add(button);
         return button;
@@ -317,7 +309,7 @@ public sealed partial class ControlCenterWindow : Window
         if (desktop) _tools.Children.Add(ActionButton("桌面图标", ToggleDesktopIcons));
         _tools.Children.Add(ActionButton("刷新", async () => { try { _status.Text = "正在扫描应用…"; await _controller.RefreshAppsAsync(); Render(); } catch (Exception ex) { ShowError(ex); } }));
         var filters = new StackPanel(); Grid.SetRow(filters, 1); _body.Children.Add(filters);
-        var searchBox = new Border { CornerRadius = new CornerRadius(12, 21, 12, 21), BorderThickness = new Thickness(.8), Padding = new Thickness(15, 10, 12, 10), Margin = new Thickness(0, 0, 0, 12) };
+        var searchBox = new Border { CornerRadius = new CornerRadius(16), BorderThickness = new Thickness(.8), Padding = new Thickness(15, 9, 12, 9), Margin = new Thickness(0, 0, 0, 10) };
         searchBox.SetResourceReference(Border.BackgroundProperty, "PanelBrush"); searchBox.SetResourceReference(Border.BorderBrushProperty, "BorderBrush");
         var searchGrid = new Grid(); searchGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(27) }); searchGrid.ColumnDefinitions.Add(new ColumnDefinition()); searchGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         var glass = Glyph("\uE721", 16); glass.VerticalAlignment = VerticalAlignment.Center; glass.SetResourceReference(TextBlock.ForegroundProperty, "MutedBrush"); searchGrid.Children.Add(glass);
@@ -346,7 +338,7 @@ public sealed partial class ControlCenterWindow : Window
             var count = Text("", 9, FontWeights.Medium, true); count.VerticalAlignment = VerticalAlignment.Center; count.Margin = new Thickness(7, 0, 0, 0); count.MinWidth = 8;
             _categoryCounts[category] = count; chipContent.Children.Add(count); chip.Content = chipContent;
             System.Windows.Automation.AutomationProperties.SetName(chip, label);
-            chip.Tag = category; chip.Padding = new Thickness(9, 7, 9, 7); chip.Margin = new Thickness(0, 0, 6, 7); chip.FontSize = 11;
+            chip.Tag = category; chip.Padding = new Thickness(9, 7, 9, 7); chip.Margin = new Thickness(0, 0, 6, 6); chip.FontSize = 11;
             ApplyButtonTemplate(chip, new CornerRadius(8, 15, 8, 15));
             if (category != "全部应用")
             {
@@ -710,11 +702,17 @@ public sealed partial class ControlCenterWindow : Window
         ToggleRow(stack, "图标倒影", "淡淡映在底座上；省电与高对比度时暂时关闭", settings.IconReflection, value => settings.IconReflection = value);
         SliderRow(stack, "倒影强度", 0, .95, settings.ReflectionStrength, value => settings.ReflectionStrength = value, value => $"{value:P0}");
         SliderRow(stack, "图标鲜艳度", 0, 1, settings.DockIconVibrancy, value => settings.DockIconVibrancy = value, value => $"{value:P0}", "提亮图标、增加色彩；0% 保留原色");
-        SelectRow(stack, "位置", "", new[] { ("Bottom", "底部"), ("Left", "左侧"), ("Right", "右侧"), ("Top", "顶部") }, settings.Position, value => settings.Position = value);
+        SelectRow(stack, "摆放方式", "拖动 Dock 握柄或底座空白处；自由摆放会记住位置", new[] { ("Edge", "四边停靠"), ("Free", "自由摆放") }, settings.DockPlacement, value => { settings.DockPlacement = value; Dispatcher.BeginInvoke(() => Render()); });
+        SelectRow(stack, "位置", "选择后恢复四边停靠", new[] { ("Bottom", "底部"), ("Left", "左侧"), ("Right", "右侧"), ("Top", "顶部") }, settings.Position, value => { settings.Position = value; settings.DockPlacement = "Edge"; Dispatcher.BeginInvoke(() => Render()); });
         var monitors = new List<(string, string)> { ("", "主显示器（自动）") };
         try { monitors.AddRange(MonitorService.GetMonitors().Select(m => (m.DeviceName, m.Label))); } catch (Exception ex) { Debug.WriteLine(ex); }
         SelectRow(stack, "显示器", "断开后使用主显示器", monitors.ToArray(), settings.MonitorDevice, value => settings.MonitorDevice = value);
-        ToggleRow(stack, "自动隐藏", "鼠标靠近 Dock 边缘时重新显示", settings.AutoHide, value => settings.AutoHide = value);
+        ToggleRow(stack, "自动隐藏", "四边停靠时生效；自由摆放时保持展开", settings.AutoHide, value => settings.AutoHide = value);
+        ActionRow(stack, "恢复底部居中", "回到所选显示器底部，保留图标与其他外观设置", "恢复位置", () =>
+        {
+            settings.DockPlacement = "Edge"; settings.Position = "Bottom"; settings.DockFreeX = .5; settings.DockFreeY = 1;
+            SaveSettings(); BuildSettingsRefresh();
+        });
         SliderRow(stack, "悬停放大强度", 0, 1, settings.AnimationStrength, value => settings.AnimationStrength = value, value => $"{value:P0}");
         var fontHeading = Section(stack, "字体与文字", "侧栏、栏目与应用名称一起调整，仅对 LumaDock 生效。");
         ToggleRow(stack, "跟随 Windows 图标字体", "读取系统的字体与粗细；名称字号随系统变化", settings.FollowSystemIconFont, value => { settings.FollowSystemIconFont = value; Dispatcher.BeginInvoke(() => Render()); });
@@ -999,6 +997,7 @@ public sealed partial class ControlCenterWindow : Window
     private void SelectRow(StackPanel parent, string title, string subtitle, (string Value, string Label)[] options, string selected, Action<string> set)
     {
         var row = SettingRow(parent, title, subtitle); var combo = new ComboBox { ItemsSource = options.Select(x => new Choice(x.Value, x.Label)).ToArray(), DisplayMemberPath = nameof(Choice.Label), SelectedValuePath = nameof(Choice.Value), SelectedValue = selected, Padding = new Thickness(9, 6, 9, 6), VerticalAlignment = VerticalAlignment.Center, MinHeight = 34 };
+        System.Windows.Automation.AutomationProperties.SetName(combo, title); combo.Tag = "Setting:" + title;
         combo.SelectionChanged += (_, _) => { if (combo.SelectedValue is string value) { set(value); SaveSettings(); } }; Grid.SetColumn(combo, 1); row.Children.Add(combo);
     }
 

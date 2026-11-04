@@ -95,7 +95,7 @@ public sealed partial class ControlCenterWindow
         _tools.Children.Add(ActionButton("打开桌面", () => Safe(() => OpenDesktopPath(_desktopFiles.UserDesktopDirectory))));
         var refresh = ActionButton("刷新", () => { _desktopDirty = true; _ = LoadDesktopAsync(); }); refresh.Tag = "DesktopRefresh"; _tools.Children.Add(refresh);
         var filters = new StackPanel(); Grid.SetRow(filters, 1); _body.Children.Add(filters);
-        var searchBox = new Border { CornerRadius = new CornerRadius(12, 21, 12, 21), BorderThickness = new Thickness(.8), Padding = new Thickness(15, 10, 12, 10), Margin = new Thickness(0, 0, 0, 12) };
+        var searchBox = new Border { CornerRadius = new CornerRadius(16), BorderThickness = new Thickness(.8), Padding = new Thickness(15, 9, 12, 9), Margin = new Thickness(0, 0, 0, 10) };
         searchBox.SetResourceReference(Border.BackgroundProperty, "PanelBrush"); searchBox.SetResourceReference(Border.BorderBrushProperty, "BorderBrush");
         var field = new Grid(); field.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(27) }); field.ColumnDefinitions.Add(new ColumnDefinition()); field.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         field.Children.Add(Glyph("\uE721", 16));
@@ -106,7 +106,7 @@ public sealed partial class ControlCenterWindow
         var clear = ChromeButton("\uE711", "清空搜索", () => search.Clear()); clear.Width = 23; clear.Height = 23; clear.Margin = new Thickness(5, -3, 0, -3); Grid.SetColumn(clear, 2); field.Children.Add(clear);
         search.TextChanged += (_, _) => { _desktopQuery = search.Text; _page = 0; placeholder.Visibility = _desktopQuery.Length == 0 ? Visibility.Visible : Visibility.Collapsed; RenderDesktopGrid(); };
         searchBox.Child = field; filters.Children.Add(searchBox);
-        var hint = Text("与 Windows 桌面同步  ·  右键空白处新建，双击打开", 11, FontWeights.Normal, true); hint.Margin = new Thickness(1, 0, 0, 12); filters.Children.Add(hint);
+        var hint = Text("与 Windows 桌面同步  ·  右键空白处新建，双击打开", 11, FontWeights.Normal, true); hint.Margin = new Thickness(1, 0, 0, 10); filters.Children.Add(hint);
         RenderDesktopGrid();
         if (_desktopDirty || _desktopSnapshot == null) _ = LoadDesktopAsync();
     }

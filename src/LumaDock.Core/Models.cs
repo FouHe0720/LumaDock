@@ -41,6 +41,9 @@ public sealed class DockSettings
     public double Spacing { get; set; } = 10;
     public string DockShape { get; set; } = "Capsule";
     public string Position { get; set; } = "Bottom";
+    public string DockPlacement { get; set; } = "Edge";
+    public double DockFreeX { get; set; } = .5;
+    public double DockFreeY { get; set; } = 1;
     public bool AutoHide { get; set; }
     public double AnimationStrength { get; set; } = .62;
     public bool Animations { get; set; } = true;
