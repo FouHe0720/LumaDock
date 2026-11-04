@@ -129,7 +129,7 @@ public sealed class IconService : IDisposable
         if (LocalPath(request.LaunchPath) && (File.Exists(request.LaunchPath) || Directory.Exists(request.LaunchPath))) candidates.Add(request.LaunchPath);
         if (!string.IsNullOrWhiteSpace(request.AppUserModelId)) candidates.Add("shell:AppsFolder\\" + request.AppUserModelId);
         if (request.LaunchPath.StartsWith("shell:AppsFolder\\", StringComparison.OrdinalIgnoreCase)) candidates.Add(request.LaunchPath);
-        if (LocalPath(request.ExecutablePath) && File.Exists(request.ExecutablePath)) candidates.Add(request.ExecutablePath);
+        if (LocalPath(request.ExecutablePath) && (File.Exists(request.ExecutablePath) || Directory.Exists(request.ExecutablePath))) candidates.Add(request.ExecutablePath);
         foreach (var candidate in candidates.Distinct(StringComparer.OrdinalIgnoreCase))
         {
             try { if (ShellImage(candidate, request.Size) is { } image) return image; }

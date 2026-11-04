@@ -139,6 +139,7 @@ public sealed class WindowTracker : IDisposable
 
     public static bool Matches(AppEntry entry, RunningWindow window)
     {
+        if (entry.IsFolder) return false; // No supported API identifies a particular Explorer folder tab reliably.
         if (!string.IsNullOrWhiteSpace(entry.AppUserModelId) && string.Equals(entry.AppUserModelId, window.AppUserModelId, StringComparison.OrdinalIgnoreCase)) return true;
         if (!string.IsNullOrWhiteSpace(entry.AppUserModelId) && !string.IsNullOrWhiteSpace(window.AppUserModelId)) return false;
         var executable = !string.IsNullOrWhiteSpace(entry.ExecutablePath) ? entry.ExecutablePath : entry.LaunchPath;

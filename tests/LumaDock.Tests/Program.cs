@@ -48,7 +48,7 @@ Test("Normalize constrains hostile settings", () =>
     var s = new AppState { Settings = new() { Opacity = double.NaN, IconSize = 900, Spacing = -3, CornerRadius = double.PositiveInfinity, AnimationStrength = 3, Columns = 100, Theme = "unknown", Position = "invalid" } };
     Catalog.Normalize(s);
     Assert(s.Settings.Opacity == .70 && s.Settings.IconSize == 80 && s.Settings.Spacing == 4 && s.Settings.CornerRadius == 24);
-    Assert(s.Settings.AnimationStrength == 1 && s.Settings.Columns == 10 && s.Settings.Theme == "System" && s.Settings.Position == "Bottom");
+    Assert(s.Settings.AnimationStrength == 1 && s.Settings.Columns == 20 && s.Settings.Theme == "System" && s.Settings.Position == "Bottom");
 });
 Test("Normalize retains custom categories and removes duplicate apps", () =>
 {

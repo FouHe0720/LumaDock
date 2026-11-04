@@ -114,6 +114,7 @@ public static class Catalog
             existing.Name = incoming.Name; existing.LaunchPath = incoming.LaunchPath;
             existing.Arguments = incoming.Arguments; existing.WorkingDirectory = incoming.WorkingDirectory;
             existing.ExecutablePath = incoming.ExecutablePath; existing.Source = incoming.Source;
+            existing.IsFolder = incoming.IsFolder;
             existing.LaunchUri = incoming.LaunchUri;
         }
         if (replaceLaunch || string.IsNullOrWhiteSpace(existing.AppUserModelId)) existing.AppUserModelId = aumid;
@@ -157,7 +158,7 @@ public static class Catalog
     public static IEnumerable<AppEntry> Search(AppState state, string query, string? category = null)
     {
         var terms = query.Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries);
-        return state.Apps.Where(a => !a.Hidden && a.IsAvailable && (string.IsNullOrEmpty(category) || a.Category == category)
+        return state.Apps.Where(a => !a.IsFolder && !a.Hidden && a.IsAvailable && (string.IsNullOrEmpty(category) || a.Category == category)
             && terms.All(t => a.Name.Contains(t, StringComparison.CurrentCultureIgnoreCase) || a.Category.Contains(t, StringComparison.CurrentCultureIgnoreCase)));
     }
 
@@ -197,7 +198,7 @@ public static class Catalog
         s.Spacing = double.IsFinite(s.Spacing) ? Math.Clamp(s.Spacing, 4, 24) : 10;
         s.CornerRadius = double.IsFinite(s.CornerRadius) ? Math.Clamp(s.CornerRadius, 0, 40) : 24;
         s.AnimationStrength = double.IsFinite(s.AnimationStrength) ? Math.Clamp(s.AnimationStrength, 0, 1) : .62;
-        s.Columns = Math.Clamp(s.Columns, 3, 10);
+        s.Columns = Math.Clamp(s.Columns, 3, 20);
         s.NameFontSize = double.IsFinite(s.NameFontSize) ? Math.Clamp(s.NameFontSize, 10, 40) : 15;
         s.NameFontFamily = (s.NameFontFamily ?? "").Trim();
         s.TextColor = NormalizeTextColor(s.TextColor);
@@ -205,6 +206,7 @@ public static class Catalog
         if (s.NameFontFamily.Length > 80 || s.NameFontFamily.Any(c => char.IsControl(c) || c is ':' or '/' or '\\' or '#')) s.NameFontFamily = "";
         if (!new[] { "Bottom", "Top", "Left", "Right" }.Contains(s.Position)) s.Position = "Bottom";
         if (!new[] { "Edge", "Free" }.Contains(s.DockPlacement)) s.DockPlacement = "Edge";
+        s.DockFreeBoundsVersion = s.DockFreeBoundsVersion == 1 ? 1 : 0;
         s.DockFreeX = double.IsFinite(s.DockFreeX) ? Math.Clamp(s.DockFreeX, 0, 1) : .5;
         s.DockFreeY = double.IsFinite(s.DockFreeY) ? Math.Clamp(s.DockFreeY, 0, 1) : 1;
         if (!new[] { "System", "Light", "Dark" }.Contains(s.Theme)) s.Theme = "System";

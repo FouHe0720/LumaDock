@@ -87,6 +87,35 @@ public static class AppDiscovery
         finally { Release(propertyShell); Release(shell); }
     });
 
+    /// <summary>Explicit Dock imports may contain folders; application discovery stays application-only.</summary>
+    public static AppEntry FromDockPath(string path) => OnSta(() =>
+    {
+        path = Path.GetFullPath(path);
+        if (Directory.Exists(path)) return FolderEntry(path, path);
+        if (!File.Exists(path)) throw new FileNotFoundException("项目不存在，请重新选择。", path);
+        if (!Path.GetExtension(path).Equals(".lnk", StringComparison.OrdinalIgnoreCase)) return FromPath(path);
+        object? shell = null, propertyShell = null;
+        try
+        {
+            shell = Activator.CreateInstance(Type.GetTypeFromProgID("WScript.Shell")!);
+            propertyShell = Activator.CreateInstance(Type.GetTypeFromProgID("Shell.Application")!);
+            var entry = Resolve(path, shell, propertyShell, "Manual");
+            return Directory.Exists(entry.ExecutablePath) ? FolderEntry(path, entry.ExecutablePath) : FromPath(path);
+        }
+        finally { Release(propertyShell); Release(shell); }
+    });
+
+    private static AppEntry FolderEntry(string launchPath, string target)
+    {
+        target = Path.GetFullPath(target);
+        var name = Path.GetFileName(Path.TrimEndingDirectorySeparator(launchPath));
+        if (File.Exists(launchPath) && Path.GetExtension(launchPath).Equals(".lnk", StringComparison.OrdinalIgnoreCase)) name = Path.GetFileNameWithoutExtension(launchPath);
+        if (name.Length == 0) name = target;
+        return new AppEntry { Id = StableId("folder:" + Path.TrimEndingDirectorySeparator(target).ToUpperInvariant()),
+            Name = name, LaunchPath = launchPath, ExecutablePath = target, WorkingDirectory = target, IsFolder = true,
+            Source = "Manual", CategoryRuleVersion = Catalog.CategoryRuleVersion };
+    }
+
     private static void ScanFolder(string folder, object? scriptShell, object? propertyShell, List<AppEntry> entries, string source, bool recursive = true)
     {
         if (string.IsNullOrWhiteSpace(folder) || !Directory.Exists(folder)) return;

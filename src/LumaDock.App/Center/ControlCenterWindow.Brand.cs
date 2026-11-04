@@ -20,16 +20,17 @@ public sealed partial class ControlCenterWindow
             if (e.ClickCount == 2) ToggleMaximize();
             else if (e.ButtonState == MouseButtonState.Pressed) DragMove();
         };
-        var brand = new StackPanel { HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(130, 2, 130, 0) };
+        var brand = new StackPanel { HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(130, 0, 130, 0) };
         var logo = new Image { Width = 46, Height = 46, Source = Icon, HorizontalAlignment = HorizontalAlignment.Center, Tag = "BrandLogo" };
         RenderOptions.SetBitmapScalingMode(logo, BitmapScalingMode.HighQuality);
         AutomationProperties.SetName(logo, "LumaDock");
         brand.Children.Add(logo);
         var name = Text("LumaDock", 13.5, FontWeights.SemiBold, true); name.Tag = "BrandName";
-        name.HorizontalAlignment = HorizontalAlignment.Center; name.Margin = new Thickness(0, 2, 0, 0); brand.Children.Add(name);
-        var line = new StackPanel { HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 1, 0, 0), Tag = "BrandLine" };
-        var tagline = Text("把整个桌面，变成你的主场。", 22, FontWeights.Medium); tagline.Tag = "BrandTagline";
-        tagline.TextAlignment = TextAlignment.Center;
+        name.HorizontalAlignment = HorizontalAlignment.Center; name.TextAlignment = TextAlignment.Center;
+        name.Margin = new Thickness(0, 8, 0, 0); brand.Children.Add(name);
+        var line = new StackPanel { HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 8, 0, 0), Tag = "BrandLine" };
+        var tagline = Text("把整个桌面，变成你的主场", 22, FontWeights.Medium); tagline.Tag = "BrandTagline";
+        tagline.HorizontalAlignment = HorizontalAlignment.Center; tagline.TextAlignment = TextAlignment.Center;
         line.Children.Add(tagline); brand.Children.Add(line); header.Children.Add(brand);
 
         var chrome = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, 13, 16, 0) };

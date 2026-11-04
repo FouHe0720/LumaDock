@@ -63,6 +63,7 @@ public sealed partial class ControlCenterWindow : Window
     private StackPanel? _settingsGroup;
     private readonly Dictionary<string, TextBlock> _categoryCounts = new(StringComparer.Ordinal);
     private IReadOnlyList<ApplicationDisplayGroup> _applicationGroups = [];
+    private readonly HashSet<string> _ambiguousAppNames = new(StringComparer.CurrentCultureIgnoreCase);
     private Dictionary<string, IReadOnlyList<AppEntry>> _variantsById = new(StringComparer.OrdinalIgnoreCase);
     private Dictionary<string, int> _applicationOrder = new(StringComparer.OrdinalIgnoreCase);
     private HashSet<string> _desktopEntryIds = new(StringComparer.OrdinalIgnoreCase);
@@ -178,7 +179,7 @@ public sealed partial class ControlCenterWindow : Window
         };
         layers.Children.Add(_liquid); layers.Children.Add(reflection); layers.Children.Add(_frame); layers.Children.Add(_glassRim);
         _shell.Child = layers; Content = _shell;
-        _frame.RowDefinitions.Add(new RowDefinition { Height = new GridLength(112) });
+        _frame.RowDefinitions.Add(new RowDefinition { Height = new GridLength(132) });
         _frame.RowDefinitions.Add(new RowDefinition());
         _frame.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(196) });
         _frame.ColumnDefinitions.Add(new ColumnDefinition());
@@ -384,7 +385,17 @@ public sealed partial class ControlCenterWindow : Window
     {
         _desktopEntryIds = _controller.State.Apps.Where(app => app.DesktopPaths.Any(File.Exists)
             || (app.Source.Equals("Desktop", StringComparison.OrdinalIgnoreCase) && File.Exists(app.LaunchPath))).Select(app => app.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        _applicationGroups = ApplicationPresentation.Group(_controller.State.Apps);
+        var applications = _controller.State.Apps.Where(app => !app.IsFolder).ToArray();
+        _applicationGroups = ApplicationPresentation.Group(applications);
+        // Search reuses this index instead of scanning the entire catalogue for
+        // every visible tile, including wide twenty-column pages.
+        _ambiguousAppNames.Clear();
+        var firstIds = new Dictionary<string, string>(StringComparer.CurrentCultureIgnoreCase);
+        foreach (var app in applications.Where(app => !app.Hidden && app.IsAvailable))
+        {
+            if (firstIds.TryGetValue(app.Name, out var id)) { if (id != app.Id) _ambiguousAppNames.Add(app.Name); }
+            else firstIds[app.Name] = app.Id;
+        }
         _variantsById = _applicationGroups.SelectMany(group => group.Entries.Select(entry => (entry.Id, group.Entries)))
             .ToDictionary(pair => pair.Id, pair => pair.Entries, StringComparer.OrdinalIgnoreCase);
         _applicationOrder = _controller.State.Apps.Select((entry, index) => (entry.Id, index)).ToDictionary(pair => pair.Id, pair => pair.index, StringComparer.OrdinalIgnoreCase);
@@ -417,7 +428,7 @@ public sealed partial class ControlCenterWindow : Window
         _status.Measure(new System.Windows.Size(availableWidth, double.PositiveInfinity));
         var font = _controller.NameFont;
         var family = new FontFamily(font.FamilyName);
-        var gridWidth = Math.Min(1080, Math.Max(300, availableWidth - 5));
+        var gridWidth = AppGridLayout.ContentWidth(availableWidth - 5, _controller.State.Settings.Columns);
         var gridHeight = Math.Max(0, availableHeight - headings - _status.DesiredSize.Height);
         var metrics = AppGridLayout.Calculate(gridWidth, gridHeight - 44, _controller.State.Settings.Columns, font.SizeDip, family.LineSpacing);
         if (apps.Count <= metrics.Columns * metrics.Rows) metrics = AppGridLayout.Calculate(gridWidth, gridHeight, _controller.State.Settings.Columns, font.SizeDip, family.LineSpacing);
@@ -455,7 +466,7 @@ public sealed partial class ControlCenterWindow : Window
         var launchModes = variants.Where(variant => !variant.Hidden && variant.IsAvailable).ToArray();
         var vm = new AppTileViewModel(app);
         var tile = new AppTileButton { Margin = new Thickness(5), Padding = new Thickness(7, 6, 7, 4), Height = metrics.TileHeight, Background = Brushes.Transparent, BorderThickness = new Thickness(0), Cursor = Cursors.Hand, DataContext = vm, ToolTip = app.Name };
-        if (_controller.State.Apps.Any(other => !other.Hidden && other.IsAvailable && other.Id != app.Id && string.Equals(other.Name, app.Name, StringComparison.CurrentCultureIgnoreCase)))
+        if (_ambiguousAppNames.Contains(app.Name))
         {
             static string Brief(string value) => value.Length <= 360 ? value : value[..180] + "…" + value[^179..];
             var target = string.IsNullOrEmpty(app.ExecutablePath) ? app.LaunchPath : app.ExecutablePath;
@@ -728,7 +739,7 @@ public sealed partial class ControlCenterWindow : Window
         var systemFont = _controller.SystemIconFont;
         ActionRow(stack, "系统图标字体", $"{systemFont.FamilyName} · {systemFont.SizeDip * .75:0.##} 磅{(systemFont.Weight >= 600 ? " · 加粗" : "")}", "刷新字体", () => { _controller.RefreshSystemFont(); _status.Text = "已读取系统图标字体"; });
         Section(stack, "应用整理", "");
-        SelectRow(stack, "每行应用数", "", Enumerable.Range(4, 7).Select(i => (i.ToString(), i + " 个")).ToArray(), settings.Columns.ToString(), value => settings.Columns = int.Parse(value));
+        SelectRow(stack, "每行应用数", "最多 20 个；窗口较窄或名称较大时自动调整", Enumerable.Range(4, 7).Concat(new[] { 12, 14, 16, 18, 20 }).Select(i => (i.ToString(), i + " 个")).ToArray(), settings.Columns.ToString(), value => settings.Columns = int.Parse(value));
         ActionRow(stack, "已隐藏的应用", $"{_controller.State.Apps.Count(a => a.Hidden)} 个应用", "恢复全部", () => { foreach (var app in _controller.State.Apps) app.Hidden = false; _controller.Save(); BuildSettingsRefresh(); });
         ActionRow(stack, "Windows 桌面图标", "主动显示或隐藏，可用同一按钮或 Windows 桌面菜单恢复", "显示 / 隐藏", ToggleDesktopIcons);
         Section(stack, "性能与启动", "");

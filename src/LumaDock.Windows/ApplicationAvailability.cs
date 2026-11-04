@@ -10,6 +10,7 @@ public static class ApplicationAvailability
 
     public static bool IsApplicationEntry(AppEntry app)
     {
+        if (app.IsFolder) return false;
         if (!string.IsNullOrWhiteSpace(app.AppUserModelId) || app.LaunchPath.StartsWith("shell:", StringComparison.OrdinalIgnoreCase)) return true;
         var target = LocalPath(app.ExecutablePath);
         if (target.Length == 0) return true;
@@ -20,6 +21,11 @@ public static class ApplicationAvailability
     /// <summary>Null means discovery could not establish whether this record is still available.</summary>
     public static bool? Evaluate(AppEntry app, AppDiscoverySnapshot snapshot)
     {
+        if (app.IsFolder)
+        {
+            var folder = string.IsNullOrWhiteSpace(app.ExecutablePath) ? app.LaunchPath : app.ExecutablePath;
+            return Directory.Exists(folder);
+        }
         if (!IsApplicationEntry(app)) return false;
         var launch = LocalPath(app.LaunchPath);
         var target = LocalPath(app.ExecutablePath);

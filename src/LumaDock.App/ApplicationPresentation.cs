@@ -39,6 +39,7 @@ public static class ApplicationPresentation
 
     private static string DirectExecutable(AppEntry entry)
     {
+        if (entry.IsFolder) return "";
         if (entry.AppUserModelId?.Contains('!') == true) return ""; // Distinct packaged identities must not collapse into a common executable.
         var path = string.IsNullOrWhiteSpace(entry.ExecutablePath) ? entry.LaunchPath : entry.ExecutablePath;
         path = Environment.ExpandEnvironmentVariables(path.Trim().Trim('"'));

@@ -1,6 +1,6 @@
 namespace LumaDock.Core;
 
-/// <summary>Physical-pixel placement. Anchors describe the remaining travel inside a monitor work area.</summary>
+/// <summary>Physical-pixel placement. Anchors describe the remaining travel inside the selected bounds.</summary>
 public readonly record struct DockWorkArea(int Left, int Top, int Width, int Height);
 public readonly record struct DockFrame(int X, int Y, int Width, int Height);
 public readonly record struct DockAnchor(double X, double Y);

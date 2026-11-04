@@ -156,6 +156,53 @@ internal static class Program
             Require(rejected && before.SequenceEqual(SHA256.HashData(File.ReadAllBytes(link))) && File.ReadAllText(document) == "fixture contents");
             Require(!ApplicationAvailability.IsApplicationEntry(new AppEntry { LaunchPath = link, ExecutablePath = transferFixture }));
         });
+        var folderTarget = Directory.CreateDirectory(Path.Combine(transferFixture, "Folder with spaces.exe")).FullName;
+        var folderContents = Path.Combine(folderTarget, "keep.txt"); File.WriteAllText(folderContents, "Unchanged folder content");
+        var folderPin = AppDiscovery.FromDockPath(folderTarget);
+        Check("Explicit Dock folder imports preserve directory names and stay outside application discovery", () =>
+        {
+            Require(folderPin.IsFolder && folderPin.Name == "Folder with spaces.exe" && folderPin.LaunchPath == folderTarget && folderPin.ExecutablePath == folderTarget);
+            Require(!ApplicationAvailability.IsApplicationEntry(folderPin) && ApplicationAvailability.Evaluate(folderPin, new([], new HashSet<string>(), true)) == true);
+            Require(folderPin.AppUserModelId.Length == 0 && folderPin.Arguments.Length == 0 && File.ReadAllText(folderContents) == "Unchanged folder content");
+        });
+        Check("Folder activation uses the actual directory through ShellExecute without executable parameters", () =>
+        {
+            var plan = ShellLauncher.CreateStartInfo(folderPin);
+            Require(plan.FileName == folderTarget && plan.WorkingDirectory == folderTarget && plan.UseShellExecute && plan.Arguments.Length == 0);
+            Require(!WindowTracker.Matches(folderPin, new(new IntPtr(1), folderPin.Name, folderTarget, "", 42)));
+            Require(!WindowTracker.Matches(new AppEntry { IsFolder = true, LaunchPath = folderTarget, AppUserModelId = "Fixture!Folder" }, new(new IntPtr(1), "Explorer", "explorer.exe", "Fixture!Folder", 42)));
+        });
+        Check("Folder export creates only a new shortcut and reimport preserves its directory identity", () =>
+        {
+            var shortcut = DesktopShortcutService.WriteShortcut(folderPin, transferFixture);
+            var bytes = File.ReadAllBytes(shortcut); var alias = AppDiscovery.FromDockPath(shortcut);
+            Require(Path.GetExtension(shortcut) == ".lnk" && alias.IsFolder && alias.LaunchPath == shortcut && alias.ExecutablePath == folderTarget);
+            Require(AppIdentity.AreEquivalent(folderPin, alias) && !AppIdentity.AreEquivalent(folderPin, transferApp));
+            Require(bytes.SequenceEqual(File.ReadAllBytes(shortcut)) && File.ReadAllText(folderContents) == "Unchanged folder content");
+        });
+        Check("Folder pins survive application refresh and softly recover when their target returns", () =>
+        {
+            var emptyFolder = Directory.CreateDirectory(Path.Combine(transferFixture, "temporary folder")).FullName;
+            var entry = AppDiscovery.FromDockPath(emptyFolder); var state = new AppState { Apps = [entry], PinnedIds = [entry.Id] };
+            var evidence = new AppDiscoverySnapshot([], new HashSet<string>(), true);
+            AppDiscovery.MergeSnapshot(state, evidence); Require(entry.IsAvailable && entry.IsFolder && state.PinnedIds.SequenceEqual([entry.Id]));
+            Directory.Delete(emptyFolder); AppDiscovery.MergeSnapshot(state, evidence); Require(!entry.IsAvailable && state.PinnedIds.SequenceEqual([entry.Id]));
+            Directory.CreateDirectory(emptyFolder); AppDiscovery.MergeSnapshot(state, evidence); Require(entry.IsAvailable && state.PinnedIds.SequenceEqual([entry.Id]));
+            Require(!Catalog.Search(state, "").Any());
+        });
+        Check("Folder identity distinguishes same-name directories and avoids Explorer executable grouping", () =>
+        {
+            var first = AppDiscovery.FromDockPath(Directory.CreateDirectory(Path.Combine(transferFixture, "one", "same name")).FullName);
+            var second = AppDiscovery.FromDockPath(Directory.CreateDirectory(Path.Combine(transferFixture, "two", "same name")).FullName);
+            var trailing = AppDiscovery.FromDockPath(first.LaunchPath + Path.DirectorySeparatorChar);
+            Require(!AppIdentity.AreEquivalent(first, second) && AppIdentity.AreEquivalent(first, trailing));
+            Require(!AppIdentity.AreEquivalent(first, new AppEntry { Id = first.Id, LaunchPath = first.LaunchPath, ExecutablePath = first.ExecutablePath }));
+        });
+        Check("Folder pins receive frozen real Shell icons without loading their children", () =>
+        {
+            using var icons = new IconService(); var image = icons.GetAsync(folderPin, 80).GetAwaiter().GetResult();
+            Require(image != null && image.IsFrozen && image.PixelWidth > 0 && File.ReadAllText(folderContents) == "Unchanged folder content");
+        });
         string originalTransfer = "";
         Check("New desktop shortcut preserves executable arguments and working directory", () =>
         {

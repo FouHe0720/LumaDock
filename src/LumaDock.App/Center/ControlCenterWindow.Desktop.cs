@@ -127,7 +127,7 @@ public sealed partial class ControlCenterWindow
         foreach (var header in _body.Children.Cast<UIElement>().Where(x => Grid.GetRow(x) < 2)) { header.Measure(new Size(width, double.PositiveInfinity)); headings += header.DesiredSize.Height; }
         _status.Measure(new Size(width, double.PositiveInfinity));
         var font = _controller.NameFont;
-        var gridWidth = Math.Min(1080, Math.Max(300, width - 5));
+        var gridWidth = AppGridLayout.ContentWidth(width - 5, _controller.State.Settings.Columns);
         var metrics = AppGridLayout.Calculate(gridWidth, Math.Max(0, height - headings - _status.DesiredSize.Height - 44), _controller.State.Settings.Columns, font.SizeDip, new FontFamily(font.FamilyName).LineSpacing);
         var pageSize = metrics.Columns * metrics.Rows;
         if (_desktopRevealPath.Length > 0)
@@ -247,7 +247,12 @@ public sealed partial class ControlCenterWindow
         menu.Items.Add(Menu("复制", () => Safe(() => Clipboard.SetFileDropList(new StringCollection { item.Path }))));
         menu.Items.Add(Menu("复制路径", () => Safe(() => Clipboard.SetText(item.Path))));
         menu.Items.Add(Menu("重命名…", () => RenameDesktopEntry(item)));
-        if (!item.IsDirectory && new[] { ".exe", ".lnk", ".url", ".appref-ms" }.Contains(Path.GetExtension(item.Path).ToLowerInvariant()))
+        if (item.IsDirectory)
+        {
+            menu.Items.Add(new Separator());
+            menu.Items.Add(Menu("固定到 Dock", () => _ = PinDesktopFolderAsync(item)));
+        }
+        else if (new[] { ".exe", ".lnk", ".url", ".appref-ms" }.Contains(Path.GetExtension(item.Path).ToLowerInvariant()))
         {
             menu.Items.Add(new Separator());
             menu.Items.Add(Menu("添加到应用库", () => _ = ImportDesktopApplicationAsync(item, false)));
@@ -316,6 +321,17 @@ public sealed partial class ControlCenterWindow
             var result = await _controller.ImportApplicationsAsync([item.Path]);
             if (result.Entries.Count > 0) { if (pin) _controller.Pin(result.Entries[0]); _status.Text = pin ? "已固定到 Dock" : "已添加到应用库"; }
             else if (result.Failures.Count > 0) _controller.Notify("此项目不能作为应用导入，可直接从桌面集打开。");
+        }
+        catch (Exception ex) { if (!_disposed) ShowError(ex); }
+    }
+
+    private async Task PinDesktopFolderAsync(DesktopItem item)
+    {
+        try
+        {
+            await _controller.AddPathsToDockAsync([item.Path], _controller.State.PinnedIds.Count);
+            if (!_disposed && _controller.State.Apps.Any(app => app.IsFolder && app.IsAvailable && string.Equals(app.LaunchPath, item.Path, StringComparison.OrdinalIgnoreCase)
+                && _controller.State.PinnedIds.Contains(app.Id))) _status.Text = "文件夹已固定到 Dock";
         }
         catch (Exception ex) { if (!_disposed) ShowError(ex); }
     }

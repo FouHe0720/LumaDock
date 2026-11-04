@@ -7,6 +7,10 @@ public sealed record AppGridMetrics(int Columns, int Rows, double TileHeight, do
 /// <summary>Preserves two readable name lines as the user's desktop font grows.</summary>
 public static class AppGridLayout
 {
+    public static double ContentWidth(double availableWidth, int requestedColumns) =>
+        Math.Min(Math.Max(1080, Math.Clamp(requestedColumns, 1, 20) * 112),
+            double.IsFinite(availableWidth) ? Math.Max(0, availableWidth) : 0);
+
     public static AppGridMetrics Calculate(double width, double height, int requestedColumns,
         double fontSize, double fontLineSpacing = 1.3)
     {
@@ -22,7 +26,7 @@ public static class AppGridLayout
         var nameHeight = lineHeight * 2 + 2;
         var tileHeight = 48 + 10 + nameHeight + 8 + 12;
         var minCellWidth = Math.Max(112, fontSize * 6.8);
-        var columns = (int)Math.Clamp(Math.Floor(width / minCellWidth), 1, Math.Clamp(requestedColumns, 1, 10));
+        var columns = (int)Math.Clamp(Math.Floor(width / minCellWidth), 1, Math.Clamp(requestedColumns, 1, 20));
         var rows = (int)Math.Clamp(Math.Floor(height / (tileHeight + 10)), 1, 4);
         return new(columns, rows, tileHeight, nameHeight, lineHeight);
     }

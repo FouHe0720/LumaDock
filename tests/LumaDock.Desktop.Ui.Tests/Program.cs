@@ -85,7 +85,7 @@ internal static class Program
                 background.IsOpen = false; background.Items.Remove(keyboardAction); background.Items.Remove(disabledAction);
                 var documentCard = Cards(window).Single(b => ((DesktopItem)b.DataContext).Path == original);
                 Check("Desktop item menus expose open, reveal, copy and rename without destructive deletion", new[] { "打开", "在资源管理器中显示", "复制", "复制路径", "重命名…" }.All(name => documentCard.ContextMenu!.Items.OfType<MenuItem>().Any(i => Equals(i.Header, name))) && !documentCard.ContextMenu!.Items.OfType<MenuItem>().Any(i => i.Header?.ToString()?.Contains("删除") == true));
-                Check("Only launchable desktop entries offer application import and Dock pinning", Cards(window).Single(b => ((DesktopItem)b.DataContext).Path == shortcut).ContextMenu!.Items.OfType<MenuItem>().Any(i => Equals(i.Header, "固定到 Dock")) && !documentCard.ContextMenu.Items.OfType<MenuItem>().Any(i => Equals(i.Header, "固定到 Dock")));
+                Check("Desktop folders and launchable entries offer Dock pinning while ordinary documents stay outside the Dock", Cards(window).Single(b => ((DesktopItem)b.DataContext).Path == shortcut).ContextMenu!.Items.OfType<MenuItem>().Any(i => Equals(i.Header, "固定到 Dock")) && Cards(window).Single(b => ((DesktopItem)b.DataContext).Path == folder).ContextMenu!.Items.OfType<MenuItem>().Any(i => Equals(i.Header, "固定到 Dock")) && !documentCard.ContextMenu.Items.OfType<MenuItem>().Any(i => Equals(i.Header, "固定到 Dock")));
                 Check("The quick-launch shortcut remains visibly explained in the restored desktop view", Descendants(window).OfType<Button>().Any(b => Equals(b.Tag, "QuickLaunchHint") && AutomationProperties.GetName(b).Contains("快速打开应用库")));
 
                 var search = Descendants(window).OfType<TextBox>().Single(t => AutomationProperties.GetName(t) == "搜索桌面"); search.Text = "工作资料"; await Frame();
@@ -117,6 +117,12 @@ internal static class Program
                 var whileHidden = Path.Combine(common, "Created while hidden.txt"); File.WriteAllText(whileHidden, "Owned hidden-window fixture"); window.Show(); await Until(() => Cards(window).Any(b => ((DesktopItem)b.DataContext).Path == whileHidden));
                 Check("Showing the desktop again discovers common-desktop changes made while hidden", Cards(window).Any(b => ((DesktopItem)b.DataContext).Path == whileHidden));
                 Check("Desktop operations preserve original bytes, shortcut bytes and the application catalog", sourceHash.SequenceEqual(SHA256.HashData(File.ReadAllBytes(original))) && shortcutHash.SequenceEqual(SHA256.HashData(File.ReadAllBytes(shortcut))) && controller.State.Apps.Count == 0 && controller.State.PinnedIds.Count == 0);
+                var folderCard = Cards(window).Single(card => ((DesktopItem)card.DataContext).Path == folder);
+                folderCard.ContextMenu!.Items.OfType<MenuItem>().Single(menu => Equals(menu.Header, "固定到 Dock")).RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+                await Until(() => controller.State.PinnedIds.Count == 1);
+                Check("The actual desktop folder menu pins its directory without importing it as an application or changing files", controller.State.Apps.Single().IsFolder && controller.State.Apps[0].LaunchPath == folder && File.ReadAllText(Path.Combine(folder, "nested-only.txt")) == "Owned nested fixture");
+                window.Navigate("Launchpad"); await Frame();
+                Check("A pinned desktop folder remains outside the application library and survives storage", Field<IReadOnlyList<ApplicationDisplayGroup>>(window, "_applicationGroups")?.Count == 0 && new StateStore(Path.Combine(root, "data")).Load().Apps.Single().IsFolder);
                 window.ClosePermanently();
                 Check("Permanently closing the window releases watchers and stops the pending debounce", Field<DesktopDirectoryWatcher?>(window, "_desktopWatcher") == null && Field<DispatcherTimer?>(window, "_desktopDebounce")?.IsEnabled != true);
                 window = null; exit = errors.Count == 0 ? 0 : 1;

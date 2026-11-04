@@ -67,9 +67,13 @@ internal static class Program
                 {
                     var logo = Descendants(window).OfType<Image>().Single(element => Equals(element.Tag, "BrandLogo"));
                     var tagline = Descendants(window).OfType<TextBlock>().Single(element => Equals(element.Tag, "BrandTagline"));
+                    var name = Descendants(window).OfType<TextBlock>().Single(element => Equals(element.Tag, "BrandName"));
                     var line = Descendants(window).OfType<FrameworkElement>().Single(element => Equals(element.Tag, "BrandLine"));
                     var p = tagline.TranslatePoint(new Point(), window); var lp = logo.TranslatePoint(new Point(), window); var bp = line.TranslatePoint(new Point(), window);
-                    Require(tagline.Text == "把整个桌面，变成你的主场。" && tagline.FontSize >= 22 && p.Y > lp.Y + logo.ActualHeight - 1 && p.Y + tagline.ActualHeight < 113, "The project introduction is missing, undersized, or not below the artwork.");
+                    var np = name.TranslatePoint(new Point(), window);
+                    Require(tagline.Text == "把整个桌面，变成你的主场" && tagline.FontSize >= 22 && p.Y + tagline.ActualHeight < 133, "The project introduction is missing, undersized, or outside the header.");
+                    Require(Math.Abs(np.X + name.ActualWidth / 2 - window.ActualWidth / 2) <= 1.5 && name.TextAlignment == TextAlignment.Center, "The wordmark is not on the same center line as the logo.");
+                    Require(np.Y - (lp.Y + logo.ActualHeight) >= 7.5 && p.Y - (np.Y + name.ActualHeight) >= 7.5, "Brand rows did not gain the requested spacing.");
                     Require(Math.Abs(p.X + tagline.ActualWidth / 2 - window.ActualWidth / 2) <= 1.5, "The separate project introduction is not centered.");
                     Require(Math.Abs(bp.X + line.ActualWidth / 2 - window.ActualWidth / 2) <= 1.5 && bp.X >= 119 && bp.X + line.ActualWidth <= window.ActualWidth - 119, "The brand line overlaps window controls or is not centered.");
                 });
@@ -108,6 +112,14 @@ internal static class Program
                 Check("A smaller workspace reduces density without clipping card labels", () => { Require(Cards(window).Length > 0 && Cards(window).Length < 18, "The small window did not adapt its card density."); CheckTileBounds(window); });
                 window.Width = 1440; window.Height = 960; await Frame();
                 Check("Enlarging the workspace uses the new content area", () => { Require(Cards(window).Length >= 18, "A larger workspace did not regain its card capacity."); CheckTileBounds(window); });
+                controller.State.Settings.Columns = 20; window.Width = 2560; controller.ApplySettings(); window.Navigate("Launchpad"); await Frame();
+                Check("Twenty-column pages use the full wide workspace and preserve complete names", () => { Require(AppGrid(window).Columns == 20, "A wide workspace retained the old content-width or column cap."); CheckTileBounds(window); });
+                window.Navigate("Settings"); await Frame();
+                var columnChoice = Descendants(window).OfType<ComboBox>().Single(combo => Equals(combo.Tag, "Setting:每行应用数"));
+                Check("The real column setting includes all new wide options", () => { foreach (var value in new[] { "12", "14", "16", "18", "20" }) Require(columnChoice.Items.Cast<object>().Any(choice => choice.GetType().GetProperty("Value")?.GetValue(choice) as string == value), "A requested column option is absent."); });
+                columnChoice.SelectedValue = "18"; await Frame();
+                Check("Wide column preferences survive save and reload", () => Require(new StateStore(Path.Combine(root, "data")).Load().Settings.Columns == 18, "Saved column count was clamped to the old limit."));
+                controller.State.Settings.Columns = 6; window.Width = 1440; controller.ApplySettings(); window.Navigate("Launchpad"); await Frame();
                 controller.State.Settings.NameFontSize = 32; controller.State.Settings.NameFontBold = true; controller.ApplySettings(); window.Navigate("Launchpad"); await Frame();
                 Check("Large personalized labels retain two complete lines in the new layout", () => { CheckTileBounds(window); Require(Descendants(window).OfType<TextBlock>().Where(t => Equals(t.Tag, "ApplicationName")).All(t => Math.Abs(t.FontSize - 32) < .01 && t.FontWeight.ToOpenTypeWeight() >= 700), "The redesign ignored personalized typography."); });
                 window.Navigate("Settings"); await Frame();
@@ -129,7 +141,13 @@ internal static class Program
 
                 controller.State.Settings.NameFontSize = 15; controller.State.Settings.NameFontBold = false;
                 controller.State.PinnedIds = controller.State.Apps.Take(3).Select(a => a.Id).ToList(); controller.ApplySettings();
-                dock = new DockWindow(controller) { ShowActivated = false }; dock.Show(); await Frame();
+                dock = new DockWindow(controller) { ShowActivated = false };
+                // Start() intentionally remains unused to avoid tray/hotkeys. Connect only
+                // this owned Dock so Save() exercises the same rebuild path as production.
+                var controllerDock = typeof(AppController).GetField("dock", Private)!;
+                controllerDock.SetValue(controller, dock);
+                dock.Closed += (_, _) => controllerDock.SetValue(controller, null);
+                dock.Show(); await Frame();
                 var dockHandle = new WindowInteropHelper(dock).Handle;
                 Check("The Dock grip requests native movement while app buttons keep their click-and-sort input", () =>
                 {
@@ -143,6 +161,18 @@ internal static class Program
                 });
                 var monitor = MonitorService.GetMonitors().FirstOrDefault(m => m.IsPrimary) ?? MonitorService.GetMonitors().First();
                 var work = new DockWorkArea(monitor.WorkLeft, monitor.WorkTop, monitor.WorkWidth, monitor.WorkHeight);
+                var bounds = new DockWorkArea(monitor.Left, monitor.Top, monitor.Width, monitor.Height);
+                controller.State.Settings.DockPlacement = "Free"; controller.State.Settings.DockFreeBoundsVersion = 0;
+                controller.State.Settings.MonitorDevice = monitor.DeviceName;
+                controller.State.Settings.DockFreeX = .25; controller.State.Settings.DockFreeY = .9;
+                dock.Reposition(); await Frame();
+                Check("An existing work-area free anchor retains its position until the user moves it", () =>
+                {
+                    CheckDockAnchor(dockHandle, work, new(.25, .9));
+                    Require(controller.State.Settings.DockFreeBoundsVersion == 0, "An old position was silently reinterpreted in full-screen coordinates.");
+                });
+                dock.RestoreBottomPlacement(); await Frame();
+                Check("Restoring edge placement still leaves the native taskbar work area available", () => CheckDockBounds(dockHandle, work));
                 GetWindowRect(dockHandle, out var dockRect);
                 var commandFrame = new DockFrame(work.Left + (int)(work.Width * .18), work.Top + (int)(work.Height * .24), dockRect.Right - dockRect.Left, dockRect.Bottom - dockRect.Top);
                 var commit = typeof(DockWindow).GetMethod("CommitFreePlacement", Private);
@@ -153,7 +183,7 @@ internal static class Program
                     var persisted = new StateStore(Path.Combine(root, "data")).Load();
                     Check("Dropping the Dock saves its monitor and normalized free position", () =>
                     {
-                        Require(persisted.Settings.DockPlacement == "Free" && persisted.Settings.MonitorDevice == monitor.DeviceName && double.IsFinite(persisted.Settings.DockFreeX) && double.IsFinite(persisted.Settings.DockFreeY), "The completion command did not persist an actual monitor anchor.");
+                        Require(persisted.Settings.DockPlacement == "Free" && persisted.Settings.DockFreeBoundsVersion == 1 && persisted.Settings.MonitorDevice == monitor.DeviceName && double.IsFinite(persisted.Settings.DockFreeX) && double.IsFinite(persisted.Settings.DockFreeY), "The completion command did not persist an actual full-monitor anchor.");
                         Require(persisted.Settings.DockFreeX is >= 0 and <= 1 && persisted.Settings.DockFreeY is >= 0 and <= 1, "The persisted position escapes its normalized range.");
                     });
                     controller.State.Settings.AutoHide = true; controller.Save(); dock.UpdateSettings(); await Task.Delay(1250); await Frame();
@@ -164,11 +194,41 @@ internal static class Program
                     });
                     var expectedAnchor = new DockAnchor(controller.State.Settings.DockFreeX, controller.State.Settings.DockFreeY);
                     dock.Rebuild(); await Frame();
-                    Check("A Dock rebuild retains its free anchor and remains on the selected work area", () => CheckDockAnchor(dockHandle, work, expectedAnchor));
+                    Check("A Dock rebuild retains its free anchor with the glass body inside the selected monitor", () => CheckFreeDockAnchor(dock, bounds, expectedAnchor));
                     controller.State.Settings.IconSize = 72; dock.UpdateSettings(); await Frame();
-                    Check("Changing icon size keeps the free Dock reachable at its saved anchor", () => CheckDockAnchor(dockHandle, work, expectedAnchor));
+                    Check("Changing icon size keeps the free Dock reachable at its saved anchor", () => CheckFreeDockAnchor(dock, bounds, expectedAnchor));
                     controller.State.Settings.MonitorDevice = "LumaDock fixture monitor that is disconnected"; dock.Reposition(); await Frame();
-                    Check("An unavailable saved monitor falls back to the real primary work area", () => CheckDockBounds(dockHandle, work));
+                    Check("An unavailable saved monitor falls back to the real primary monitor bounds", () => CheckFreeDockBounds(dock, bounds));
+                    GetWindowRect(dockHandle, out var freeRect);
+                    var previousPlate = DockGlassBounds(dock);
+                    var inset = Math.Max(2, (int)Math.Ceiling(4 * Dpi(dockHandle)));
+                    var taskbarEdge = work.Top > bounds.Top ? "Top" : work.Top + work.Height < bounds.Top + bounds.Height ? "Bottom"
+                        : work.Left > bounds.Left ? "Left" : work.Left + work.Width < bounds.Left + bounds.Width ? "Right" : "None";
+                    var targetPlateX = bounds.Left + (bounds.Width - previousPlate.Width) / 2;
+                    var targetPlateY = bounds.Top + (bounds.Height - previousPlate.Height) / 2;
+                    if (taskbarEdge == "Top") targetPlateY = bounds.Top + inset;
+                    else if (taskbarEdge is "Bottom" or "None") targetPlateY = bounds.Top + bounds.Height - previousPlate.Height - inset;
+                    else if (taskbarEdge == "Left") targetPlateX = bounds.Left + inset;
+                    else targetPlateX = bounds.Left + bounds.Width - previousPlate.Width - inset;
+                    var taskbarFrame = new DockFrame((int)Math.Round(targetPlateX - (previousPlate.Left - freeRect.Left)),
+                        (int)Math.Round(targetPlateY - (previousPlate.Top - freeRect.Top)), freeRect.Right - freeRect.Left, freeRect.Bottom - freeRect.Top);
+                    commit.Invoke(dock, [taskbarFrame, monitor]); await Frame();
+                    Check("The visible glass body reaches the actual reserved taskbar strip and retains its saved location", () =>
+                    {
+                        Require(GetWindowRect(dockHandle, out var actual), "The freely placed Dock has no native bounds.");
+                        var glass = DockGlassBounds(dock);
+                        observations["taskbarOverlap"] = new { bounds, work, taskbarEdge, glass = new { glass.Left, glass.Top, glass.Width, glass.Height }, actualFrame = new { actual.Left, actual.Top, actual.Right, actual.Bottom }, inset };
+                        CheckFreeDockBounds(dock, bounds);
+                        Require(Math.Abs(glass.Left - targetPlateX) <= 2 && Math.Abs(glass.Top - targetPlateY) <= 2,
+                            "Transparent flight padding prevented the visible glass body from reaching the selected screen edge.");
+                        var overlaps = taskbarEdge switch { "Top" => glass.Top < work.Top - 1, "Bottom" => glass.Bottom > work.Top + work.Height + 1,
+                            "Left" => glass.Left < work.Left - 1, "Right" => glass.Right > work.Left + work.Width + 1, _ => true };
+                        Require(overlaps, "The native window moved, but its visible glass body still does not enter the actual taskbar strip.");
+                        var saved = new StateStore(Path.Combine(root, "data")).Load().Settings;
+                        var endpoint = taskbarEdge switch { "Top" => saved.DockFreeY < .01, "Bottom" or "None" => saved.DockFreeY > .99,
+                            "Left" => saved.DockFreeX < .01, _ => saved.DockFreeX > .99 };
+                        Require(saved.DockFreeBoundsVersion == 1 && endpoint, "The visible glass edge position did not survive persistence.");
+                    });
                     Check("Free placement and relayout preserve the ordinary non-topmost Dock layer", () => Require(!dock.Topmost && (GetWindowLongPtr(dockHandle, -20).ToInt64() & 8) == 0, "A moved Dock became native topmost."));
                     cover = new Window { Title = "LumaDock workspace layer fixture", Width = 220, Height = 110, ShowActivated = false, ShowInTaskbar = false, WindowStyle = WindowStyle.None, Background = Brushes.DimGray, Left = 200, Top = 180 };
                     cover.Show(); await Frame(); var coverHandle = new WindowInteropHelper(cover).Handle;
@@ -216,9 +276,47 @@ internal static class Program
             var moved = DockPlacementGeometry.Resolve(new(0, -1440, 2560, 1440), 960, 195, anchor.X, anchor.Y);
             Require(Math.Abs(moved.X - 320) <= 1 && Math.Abs(moved.Y - (-631)) <= 1, "A changed physical size did not preserve the relative travel anchor.");
         });
+        check("Full-monitor drag bounds admit bottom and side taskbar strips without escaping the screen", () =>
+        {
+            var monitor = new DockWorkArea(-1920, -180, 1920, 1080);
+            var oldWork = new DockWorkArea(-1872, -180, 1872, 1032);
+            var bottom = DockPlacementGeometry.Clamp(monitor, new(-1000, 780, 640, 140), 4);
+            var side = DockPlacementGeometry.Clamp(monitor, new(-1930, 200, 640, 140), 4);
+            Require(bottom.Y + bottom.Height == 896 && bottom.Y + bottom.Height > oldWork.Top + oldWork.Height,
+                "A bottom taskbar strip was incorrectly excluded from free placement.");
+            Require(side.X == -1916 && side.X < oldWork.Left, "A side taskbar strip was incorrectly excluded from free placement.");
+            Require(bottom.X >= monitor.Left && side.Y >= monitor.Top && side.X + side.Width <= monitor.Left + monitor.Width,
+                "Allowing a taskbar overlap let the Dock escape the full monitor.");
+        });
     }
     private static void CheckDockBounds(IntPtr handle, DockWorkArea work) { Require(GetWindowRect(handle, out var r), "No Dock bounds."); Require(r.Left >= work.Left - 1 && r.Top >= work.Top - 1 && r.Right <= work.Left + work.Width + 1 && r.Bottom <= work.Top + work.Height + 1, "The Dock is outside the reachable work area."); }
     private static void CheckDockAnchor(IntPtr handle, DockWorkArea work, DockAnchor expected) { CheckDockBounds(handle, work); GetWindowRect(handle, out var r); var actual = DockPlacementGeometry.AnchorFor(work, new(r.Left, r.Top, r.Right - r.Left, r.Bottom - r.Top)); Require(Math.Abs(actual.X - expected.X) < .012 && Math.Abs(actual.Y - expected.Y) < .012, "The free position jumped after a Dock layout update."); }
+    private static Rect DockGlassBounds(DockWindow dock)
+    {
+        var body = (FrameworkElement)typeof(DockWindow).GetField("body", Private)!.GetValue(dock)!;
+        return new(body.PointToScreen(new Point()), body.PointToScreen(new Point(body.ActualWidth, body.ActualHeight)));
+    }
+    private static void CheckFreeDockBounds(DockWindow dock, DockWorkArea monitor)
+    {
+        var glass = DockGlassBounds(dock);
+        Require(glass.Width > 0 && glass.Height > 0 && glass.Left >= monitor.Left - 1 && glass.Top >= monitor.Top - 1
+            && glass.Right <= monitor.Left + monitor.Width + 1 && glass.Bottom <= monitor.Top + monitor.Height + 1,
+            "The interactive glass body left the monitor; only transparent flight padding may extend outside.");
+        var grip = (FrameworkElement)typeof(DockWindow).GetField("positionGrip", Private)!.GetValue(dock)!;
+        var point = grip.PointToScreen(new Point(grip.ActualWidth / 2, grip.ActualHeight / 2));
+        Require(point.X >= monitor.Left && point.X < monitor.Left + monitor.Width && point.Y >= monitor.Top && point.Y < monitor.Top + monitor.Height,
+            "The freely placed Dock grip became unreachable off-screen.");
+    }
+    private static void CheckFreeDockAnchor(DockWindow dock, DockWorkArea monitor, DockAnchor expected)
+    {
+        CheckFreeDockBounds(dock, monitor);
+        var glass = DockGlassBounds(dock);
+        var inset = Math.Max(2, (int)Math.Ceiling(4 * Dpi(new WindowInteropHelper(dock).Handle)));
+        var actual = DockPlacementGeometry.AnchorFor(monitor, new((int)Math.Round(glass.Left), (int)Math.Round(glass.Top),
+            (int)Math.Round(glass.Width), (int)Math.Round(glass.Height)), inset);
+        Require(Math.Abs(actual.X - expected.X) < .012 && Math.Abs(actual.Y - expected.Y) < .012,
+            "The visible glass body lost its saved relative position after a layout update.");
+    }
     private static UniformGrid AppGrid(DependencyObject root) => Descendants(root).OfType<UniformGrid>().Single(grid => grid.Children.OfType<Button>().Any(button => button.DataContext is AppTileViewModel));
     private static Button[] Cards(DependencyObject root) => Descendants(root).OfType<Button>().Where(button => button.DataContext is AppTileViewModel).ToArray();
     private static void CheckTileBounds(ControlCenterWindow window)

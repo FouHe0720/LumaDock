@@ -57,11 +57,23 @@ Test("Invalid or extreme input never creates nonfinite or zero geometry", () =>
     foreach (var invalid in new[] { double.NaN, double.PositiveInfinity, double.NegativeInfinity, -10d, 0d, double.MaxValue })
     {
         var layout = AppGridLayout.Calculate(invalid, invalid, int.MaxValue, invalid, invalid);
-        Require(layout.Columns is >= 1 and <= 10 && layout.Rows is >= 1 and <= 4, "Invalid grid dimensions escaped normalization.");
+        Require(layout.Columns is >= 1 and <= 20 && layout.Rows is >= 1 and <= 4, "Invalid grid dimensions escaped normalization.");
         Require(double.IsFinite(layout.NameHeight) && double.IsFinite(layout.TileHeight) && double.IsFinite(layout.LineHeight), "Nonfinite tile geometry escaped normalization.");
         Require(layout.NameHeight > 0 && layout.TileHeight > 0 && layout.LineHeight > 0, "Invalid input produced empty labels.");
     }
     Require(AppGridLayout.Calculate(850, 450, int.MinValue, 14).Columns == 1, "Invalid requested columns must still produce one column.");
+});
+
+Test("Wide viewports expose twelve through twenty columns without the former width cap", () =>
+{
+    foreach (var count in new[] { 12, 14, 16, 18, 20 })
+    {
+        var width = AppGridLayout.ContentWidth(2500, count);
+        var layout = AppGridLayout.Calculate(width, 600, count, 15);
+        Require(layout.Columns == count && width <= 2500, "The requested wide grid is still capped at ten columns or 1080 DIP.");
+    }
+    Require(AppGridLayout.Calculate(AppGridLayout.ContentWidth(650, 20), 600, 20, 32).Columns < 12, "Wide options must still adapt to large type and narrow windows.");
+    Require(AppGridLayout.Calculate(10000, 600, int.MaxValue, 15).Columns == 20, "The hard maximum escaped twenty columns.");
 });
 
 var reportIndex = Array.IndexOf(args, "--report");

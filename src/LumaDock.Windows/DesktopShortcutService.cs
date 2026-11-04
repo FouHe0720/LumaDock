@@ -60,9 +60,10 @@ public static class DesktopShortcutService
                     }
                     else
                     {
-                        if (!File.Exists(app.LaunchPath)) throw new FileNotFoundException("应用已移动，请重新添加。");
-                        link.SetPath(Path.GetFullPath(app.LaunchPath));
-                        link.SetArguments(app.Arguments ?? "");
+                        var target = app.IsFolder && !string.IsNullOrWhiteSpace(app.ExecutablePath) ? app.ExecutablePath : app.LaunchPath;
+                        if (app.IsFolder ? !Directory.Exists(target) : !File.Exists(target)) throw new FileNotFoundException("项目已移动，请重新添加。");
+                        link.SetPath(Path.GetFullPath(target));
+                        link.SetArguments(app.IsFolder ? "" : app.Arguments ?? "");
                         if (Directory.Exists(app.WorkingDirectory)) link.SetWorkingDirectory(app.WorkingDirectory);
                     }
                     link.SetDescription(app.Name ?? "");

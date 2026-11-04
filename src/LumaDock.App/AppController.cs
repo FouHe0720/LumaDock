@@ -107,8 +107,9 @@ public sealed class AppController : IDisposable
             var snapshot = await RunStaAsync(AppDiscovery.ScanSnapshot);
             if (disposed) return;
             AppDiscovery.MergeSnapshot(State, snapshot);
-            Save(); metrics["scanMs"] = sw.Elapsed.TotalMilliseconds; metrics["appCount"] = State.Apps.Count(a => a.IsAvailable && !a.Hidden);
-            metrics["unavailableCount"] = State.Apps.Count(a => !a.IsAvailable);
+            Save(); metrics["scanMs"] = sw.Elapsed.TotalMilliseconds; metrics["appCount"] = State.Apps.Count(a => !a.IsFolder && a.IsAvailable && !a.Hidden);
+            metrics["unavailableCount"] = State.Apps.Count(a => !a.IsFolder && !a.IsAvailable);
+            metrics["folderPinCount"] = State.Apps.Count(a => a.IsFolder && State.PinnedIds.Contains(a.Id));
             metrics["shellInventoryComplete"] = snapshot.AppsFolderComplete; WriteMetrics();
             Log.Write($"Scan completed: {snapshot.Entries.Count} discovered, {sw.ElapsedMilliseconds}ms; Shell complete: {snapshot.AppsFolderComplete}");
         }
@@ -235,8 +236,8 @@ public sealed class AppController : IDisposable
             var found = new List<AppEntry>(); var failures = 0;
             foreach (var path in batch)
             {
-                try { ValidateAppPath(path); found.Add(AppDiscovery.FromPath(path)); }
-                catch (Exception error) when (error is IOException or InvalidDataException or UnauthorizedAccessException or ArgumentException or System.Runtime.InteropServices.COMException) { failures++; Log.Write("Dock import skipped an unavailable file", error); }
+                try { ValidateDockPath(path); found.Add(AppDiscovery.FromDockPath(path)); }
+                catch (Exception error) when (error is IOException or InvalidDataException or UnauthorizedAccessException or ArgumentException or NotSupportedException or System.Runtime.InteropServices.COMException) { failures++; Log.Write("Dock import skipped an unavailable file", error); }
             }
             return (found, failures);
         });
@@ -247,7 +248,12 @@ public sealed class AppController : IDisposable
         foreach (var group in ApplicationPresentation.Group(apps)) selected.Add(PrepareApplicationPin(group.Representative, ref gap));
         DockOrder.InsertAtGap(State.PinnedIds, selected.Distinct(StringComparer.OrdinalIgnoreCase), gap);
         if (apps.Length > 0) Save();
-        if (result.failures > 0) Notify("有些文件无法加入 Dock，请选择程序或快捷方式。");
+        if (result.failures > 0) Notify("有些项目无法加入 Dock，请选择文件夹、程序或快捷方式。");
+    }
+    private static void ValidateDockPath(string path)
+    {
+        if (Directory.Exists(path)) return;
+        ValidateAppPath(path);
     }
     private static void ValidateAppPath(string path)
     {

@@ -140,7 +140,9 @@ public sealed class DockWindow : Window
             var monitor = MonitorForFrame(proposed);
             if (monitor != null)
             {
-                var frame = DockPlacementGeometry.Clamp(WorkArea(monitor), proposed, PlacementInset());
+                // Dragging is free placement even when it starts from an edge stop.
+                // The taskbar occupies work-area space, but is still inside this monitor.
+                var frame = DockPlacementGeometry.Clamp(DragBounds(monitor), proposed, PlacementInset());
                 Marshal.StructureToPtr(new Native.Rect { Left = frame.X, Top = frame.Y, Right = frame.X + frame.Width, Bottom = frame.Y + frame.Height }, l, false);
             }
             NativeWindowHelper.ApplyDockLayer(handle);
@@ -191,6 +193,20 @@ public sealed class DockWindow : Window
     private DockFrame? WindowFrame() => Native.GetWindowRect(handle, out var rect) ? new(rect.Left, rect.Top, rect.Right - rect.Left, rect.Bottom - rect.Top) : null;
     private int PlacementInset() => Math.Max(2, (int)Math.Ceiling(Native.GetDpiForWindow(handle) / 96d * 4));
     private static DockWorkArea WorkArea(MonitorInfo monitor) => new(monitor.WorkLeft, monitor.WorkTop, monitor.WorkWidth, monitor.WorkHeight);
+    private static DockWorkArea MonitorBounds(MonitorInfo monitor) => new(monitor.Left, monitor.Top, monitor.Width, monitor.Height);
+    private DockWorkArea DragBounds(MonitorInfo monitor)
+    {
+        // Only transparent magnification/end reserves may leave the screen. Keeping
+        // the glass body inside the monitor makes its grip reachable at every edge,
+        // including a taskbar at the top while the Dock still faces upwards.
+        var scale = Math.Max(1, Native.GetDpiForWindow(handle)) / 96d;
+        var left = Math.Max(0, (int)Math.Floor(body.Margin.Left * scale));
+        var top = Math.Max(0, (int)Math.Floor(body.Margin.Top * scale));
+        var right = Math.Max(0, (int)Math.Floor(body.Margin.Right * scale));
+        var bottom = Math.Max(0, (int)Math.Floor(body.Margin.Bottom * scale));
+        return new(monitor.Left - left, monitor.Top - top, monitor.Width + left + right, monitor.Height + top + bottom);
+    }
+    private DockWorkArea FreePlacementArea(MonitorInfo monitor) => controller.State.Settings.DockFreeBoundsVersion == 1 ? DragBounds(monitor) : WorkArea(monitor);
     private static MonitorInfo? MonitorForFrame(DockFrame frame)
     {
         var monitors = MonitorService.GetMonitors();
@@ -201,9 +217,10 @@ public sealed class DockWindow : Window
 
     private void CommitFreePlacement(DockFrame frame, MonitorInfo monitor)
     {
-        var anchor = DockPlacementGeometry.AnchorFor(WorkArea(monitor), frame, PlacementInset());
+        var anchor = DockPlacementGeometry.AnchorFor(DragBounds(monitor), frame, PlacementInset());
         var settings = controller.State.Settings;
         settings.DockPlacement = "Free"; settings.MonitorDevice = monitor.DeviceName;
+        settings.DockFreeBoundsVersion = 1;
         settings.DockFreeX = anchor.X; settings.DockFreeY = anchor.Y;
         hideDelay.Stop(); controller.Save();
     }
@@ -442,8 +459,9 @@ public sealed class DockWindow : Window
         var s = controller.State.Settings;
         var length = tiles.Count * (s.IconSize + s.Spacing + 12) + (tiles.Count > 1 ? 19 : 0) + 28 + endReserve * 2;
         var thickness = bodyThickness + flight + 12;
-        fullWidth = Vertical ? thickness : Math.Min(length, monitor.WorkWidth / dpi - 16);
-        fullHeight = Vertical ? Math.Min(length, monitor.WorkHeight / dpi - 16) : thickness;
+        var available = FreePlacement && s.DockFreeBoundsVersion == 1 ? MonitorBounds(monitor) : WorkArea(monitor);
+        fullWidth = Vertical ? thickness : Math.Min(length, available.Width / dpi - 16);
+        fullHeight = Vertical ? Math.Min(length, available.Height / dpi - 16) : thickness;
         var width = fullWidth; var height = fullHeight;
         if (tucked) { if (Vertical) width = 5; else height = 5; }
         Width = Math.Max(5, width); Height = Math.Max(5, height);
@@ -476,7 +494,7 @@ public sealed class DockWindow : Window
         if (s.Position == "Right") { x = monitor.WorkLeft + monitor.WorkWidth - w - gap; y = monitor.WorkTop + (monitor.WorkHeight - h) / 2; }
         if (FreePlacement)
         {
-            var frame = DockPlacementGeometry.Resolve(WorkArea(monitor), w, h, s.DockFreeX, s.DockFreeY, PlacementInset());
+            var frame = DockPlacementGeometry.Resolve(FreePlacementArea(monitor), w, h, s.DockFreeX, s.DockFreeY, PlacementInset());
             x = frame.X; y = frame.Y; w = frame.Width; h = frame.Height;
         }
         NativeWindowHelper.SetPosition(handle, x, y, w, h);
@@ -591,7 +609,7 @@ public sealed class DockWindow : Window
             // An immutable copy also keeps a scan/settings change from altering an active transfer.
             var snapshot = new AppEntry { Id = app.Id, Name = app.Name, LaunchPath = app.LaunchPath,
                 Arguments = app.Arguments, WorkingDirectory = app.WorkingDirectory, ExecutablePath = app.ExecutablePath,
-                AppUserModelId = app.AppUserModelId, CustomIconPath = app.CustomIconPath };
+                AppUserModelId = app.AppUserModelId, CustomIconPath = app.CustomIconPath, IsFolder = app.IsFolder };
             var data = new DockTransferData(app.Id, () => [DesktopShortcutService.PrepareTransfer(snapshot)], error =>
             { Storage.Log.Write("Shortcut transfer preparation failed", error); controller.Notify("这个应用暂时无法拖到桌面，Dock 内排序仍可使用。"); });
             if (closed || controller.IsDisposed || Mouse.LeftButton != MouseButtonState.Pressed || !IsVisible) return;

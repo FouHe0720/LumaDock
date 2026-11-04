@@ -25,6 +25,7 @@
     "DockShape": "Capsule",
     "Position": "Bottom",
     "DockPlacement": "Edge",
+    "DockFreeBoundsVersion": 0,
     "DockFreeX": 0.5,
     "DockFreeY": 1,
     "AutoHide": false,

@@ -10,6 +10,7 @@ public sealed class AppEntry
     public string ExecutablePath { get; set; } = "";
     public string AppUserModelId { get; set; } = "";
     public string LaunchUri { get; set; } = "";
+    public bool IsFolder { get; set; }
     public string CustomIconPath { get; set; } = "";
     public string Category { get; set; } = "";
     public bool CategoryIsUserAssigned { get; set; }
@@ -42,6 +43,8 @@ public sealed class DockSettings
     public string DockShape { get; set; } = "Capsule";
     public string Position { get; set; } = "Bottom";
     public string DockPlacement { get; set; } = "Edge";
+    // 0 retains pre-0.11.1 work-area anchors; an actual drag writes full-monitor anchors (1).
+    public int DockFreeBoundsVersion { get; set; }
     public double DockFreeX { get; set; } = .5;
     public double DockFreeY { get; set; } = 1;
     public bool AutoHide { get; set; }

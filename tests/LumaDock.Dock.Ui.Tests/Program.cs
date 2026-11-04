@@ -313,6 +313,38 @@ internal static class Program
                     Require(loaded.PinnedIds.SequenceEqual(controller.State.PinnedIds) && File.Exists(path), "Pin order was not persisted or a launch file changed.");
                 });
                 controller.State.PinnedIds = originalPins.ToList(); controller.State.Settings.Position = "Bottom"; dock.UpdateSettings(); await Frame();
+                var folderRoot = Directory.CreateDirectory(Path.Combine(profile, "folder pins")).FullName;
+                var firstFolder = Directory.CreateDirectory(Path.Combine(folderRoot, "Projects.exe")).FullName;
+                var secondFolder = Directory.CreateDirectory(Path.Combine(folderRoot, "Reference")).FullName;
+                var keptFile = Path.Combine(firstFolder, "keep.txt"); File.WriteAllText(keptFile, "Keep source content");
+                await controller.AddPathsToDockAsync([firstFolder, secondFolder, firstFolder], 3); dock.Rebuild(); await Frame();
+                var folderEntries = controller.State.Apps.Where(entry => entry.IsFolder).ToArray();
+                Check("A mixed folder batch inserts real directories between the intended application pins without duplicates", () =>
+                {
+                    Require(folderEntries.Length == 2, "The folder batch was rejected or duplicated.");
+                    Require(controller.State.PinnedIds.SequenceEqual(originalPins.Take(3).Concat(folderEntries.Select(entry => entry.Id)).Concat(originalPins.Skip(3))), "Folders did not enter the requested visible gap.");
+                    Require(Tiles(dock).Count(tile => Field<AppEntry?>(tile, "App")?.IsFolder == true) == 2, "Real folder pins are missing from the Dock.");
+                });
+                Check("Folder pins persist as directories and preserve their source contents and application pins", () =>
+                {
+                    var saved = new StateStore(profile).Load();
+                    Require(saved.Apps.Count(entry => entry.IsFolder) == 2 && saved.PinnedIds.SequenceEqual(controller.State.PinnedIds), "Folder type or insertion order did not survive a configuration roundtrip.");
+                    Require(File.ReadAllText(keptFile) == "Keep source content" && Directory.Exists(secondFolder), "Import moved or changed a source directory.");
+                });
+                var folderImage = await controller.GetIconAsync(folderEntries[0]); dock.RefreshWindows(); await Frame();
+                Check("Pinned folders use real frozen Shell icons and never imply an Explorer running state", () =>
+                {
+                    Require(folderImage is { IsFrozen: true }, "The imported folder did not receive a real Shell icon.");
+                    Require(Tiles(dock).Where(tile => Field<AppEntry?>(tile, "App")?.IsFolder == true).All(tile => Field<Border>(tile, "Dot").Opacity == 0), "A folder received an unverified application running marker.");
+                });
+                await controller.AddPathsToDockAsync([firstFolder], 3); await Frame();
+                Check("Reimporting a pinned folder and its shortcut preserves a single logical folder pin", () =>
+                {
+                    var exported = DesktopShortcutService.WriteShortcut(folderEntries[0], folderRoot);
+                    Require(AppIdentity.AreEquivalent(folderEntries[0], AppDiscovery.FromDockPath(exported)), "The exported shortcut lost its directory identity.");
+                    Require(controller.State.Apps.Count(entry => entry.IsFolder) == 2 && controller.State.PinnedIds.Distinct().Count() == originalPins.Length + 2, "A repeated folder drop duplicated pins.");
+                });
+                controller.State.Apps = scenarioApps.ToList(); controller.State.PinnedIds = originalPins.ToList(); dock.UpdateSettings(); await Frame();
                 Check("Icon centres hit their actual application buttons", () =>
                 {
                     foreach (var tile in Tiles(dock))

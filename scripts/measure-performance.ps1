@@ -33,6 +33,20 @@ namespace LumaDock {
         [DllImport("user32.dll")] private static extern bool IsWindowVisible(IntPtr window);
         [DllImport("user32.dll", CharSet=CharSet.Unicode)] private static extern int GetWindowText(IntPtr window, System.Text.StringBuilder text, int count);
         [DllImport("user32.dll", EntryPoint="GetWindowLongPtrW")] private static extern IntPtr GetWindowLongPtr(IntPtr window, int index);
+        [DllImport("user32.dll")] private static extern bool GetWindowRect(IntPtr window, out CaretRect rectangle);
+        [DllImport("user32.dll")] private static extern uint GetDpiForWindow(IntPtr window);
+        public static int[] MainWindowSize(int processId) {
+            var result = new int[3];
+            EnumWindows((window, unused) => {
+                uint owner; GetWindowThreadProcessId(window, out owner);
+                if (owner != (uint)processId || !IsWindowVisible(window) || (GetWindowLongPtr(window, -20).ToInt64() & 0x80) != 0) return true;
+                var title = new System.Text.StringBuilder(128); GetWindowText(window,title,title.Capacity);
+                if (title.ToString() != "LumaDock" || !GetWindowRect(window, out var bounds)) return true;
+                result = new[] { bounds.Right - bounds.Left, bounds.Bottom - bounds.Top, (int)GetDpiForWindow(window) };
+                return false;
+            }, IntPtr.Zero);
+            return result;
+        }
         public static bool MainWindowVisible(int processId) {
             bool visible = false;
             EnumWindows((window, unused) => {
@@ -101,6 +115,7 @@ try {
         $LumaCpu = $LumaMeasuredProcess.TotalProcessorTime.TotalMilliseconds
         $LumaPerf = Get-CimInstance -ClassName Win32_PerfFormattedData_PerfProc_Process -Filter "IDProcess = $($LumaMeasuredProcess.Id)" -ErrorAction SilentlyContinue | Select-Object -First 1
         $LumaPrivateWorkingSet = if ($LumaPerf) { [double]$LumaPerf.WorkingSetPrivate / 1MB } else { $null }
+        $LumaWindowSize = [LumaDock.PerformanceNative]::MainWindowSize($LumaMeasuredProcess.Id)
         $LumaSamples.Add([pscustomobject]@{
             elapsedSeconds = [math]::Round($LumaNow / 1000, 3)
             cpuPercentMachine = [math]::Round(100 * ($LumaCpu - $LumaPreviousCpu) / ($LumaNow - $LumaPreviousTime) / $LumaProcessorCount, 4)
@@ -113,6 +128,9 @@ try {
             isForeground = [LumaDock.PerformanceNative]::IsForeground($LumaMeasuredProcess.Id)
             hasNativeCaret = [LumaDock.PerformanceNative]::HasNativeCaret($LumaMeasuredProcess.Id)
             mainWindowVisible = [LumaDock.PerformanceNative]::MainWindowVisible($LumaMeasuredProcess.Id)
+            mainWindowWidthPx = $LumaWindowSize[0]
+            mainWindowHeightPx = $LumaWindowSize[1]
+            mainWindowDpi = $LumaWindowSize[2]
         })
         $LumaPreviousCpu = $LumaCpu
         $LumaPreviousTime = $LumaNow
@@ -144,6 +162,7 @@ $LumaSummary = [ordered]@{
     desktopOpen = [bool]$ShowDesktop
     seededConfiguration = [bool]$SeedConfig
     configuredPinnedApps = if ($LumaFinalConfig) { @($LumaFinalConfig.PinnedIds).Count } else { $null }
+    configuredColumns = if ($LumaFinalConfig) { $LumaFinalConfig.Settings.Columns } else { $null }
     dockPlacement = if ($LumaFinalConfig) { $LumaFinalConfig.Settings.DockPlacement } else { $null }
     dockFreeX = if ($LumaFinalConfig) { $LumaFinalConfig.Settings.DockFreeX } else { $null }
     dockFreeY = if ($LumaFinalConfig) { $LumaFinalConfig.Settings.DockFreeY } else { $null }
@@ -155,6 +174,9 @@ $LumaSummary = [ordered]@{
     foregroundSamples = @($LumaSamples | Where-Object isForeground).Count
     nativeCaretSamples = @($LumaSamples | Where-Object hasNativeCaret).Count
     mainWindowVisibleSamples = @($LumaSamples | Where-Object mainWindowVisible).Count
+    peakMainWindowWidthPx = ($LumaSamples | Measure-Object mainWindowWidthPx -Maximum).Maximum
+    peakMainWindowHeightPx = ($LumaSamples | Measure-Object mainWindowHeightPx -Maximum).Maximum
+    mainWindowDpi = ($LumaSamples | Where-Object mainWindowVisible | Select-Object -Last 1).mainWindowDpi
     averageCpuPercentMachine = ($LumaSamples | Measure-Object cpuPercentMachine -Average).Average
     averageCpuPercentOneCore = ($LumaSamples | Measure-Object cpuPercentOneCore -Average).Average
     peakWorkingSetMB = ($LumaSamples | Measure-Object workingSetMB -Maximum).Maximum

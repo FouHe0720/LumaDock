@@ -14,6 +14,9 @@ public static class AppIdentity
 
     public static bool AreEquivalent(AppEntry left, AppEntry right)
     {
+        // Folder pins have path identity, never an Explorer process or an app identity.
+        if (left.IsFolder || right.IsFolder)
+            return left.IsFolder && right.IsFolder && FolderPath(left).Length > 0 && Paths.Equals(FolderPath(left), FolderPath(right));
         if (Paths.Equals(left.Id, right.Id)) return true;
         var leftLaunch = NormalizePath(left.LaunchPath); var rightLaunch = NormalizePath(right.LaunchPath);
         if (leftLaunch.Length > 0 && Paths.Equals(leftLaunch, rightLaunch)
@@ -36,6 +39,7 @@ public static class AppIdentity
     internal static IEnumerable<string> Keys(AppEntry app)
     {
         yield return "id:" + (app.Id ?? "").ToUpperInvariant();
+        if (app.IsFolder) { yield return "folder:" + FolderPath(app).ToUpperInvariant(); yield break; }
         var launch = NormalizePath(app.LaunchPath);
         if (launch.Length > 0) yield return "file:" + launch.ToUpperInvariant();
         var arguments = Arguments(app);
@@ -45,6 +49,8 @@ public static class AppIdentity
         if (target.Length > 0) yield return "target:" + target.ToUpperInvariant() + "|" + arguments;
         if (!string.IsNullOrWhiteSpace(app.AppUserModelId)) yield return "aumid:" + app.AppUserModelId.Trim().ToUpperInvariant() + "|" + arguments;
     }
+
+    private static string FolderPath(AppEntry app) => NormalizePath(string.IsNullOrWhiteSpace(app.ExecutablePath) ? app.LaunchPath : app.ExecutablePath);
 
     private static string Arguments(AppEntry app)
     {
