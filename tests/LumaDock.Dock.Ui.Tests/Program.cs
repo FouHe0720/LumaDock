@@ -411,7 +411,11 @@ internal static class Program
                     }
                     Call(dock, "ResetMagnification"); await Settle();
                 }
-                controller.State.Settings.IconSize = 80; controller.State.Settings.AnimationStrength = 1;
+                controller.State.Settings.IconSize = 160; controller.State.Settings.AnimationStrength = 1;
+                // This fixture checks maximum-size hover, not scrolling. Keep
+                // five actions (launcher plus four apps) inside both monitor axes.
+                // The last action is still the target, so end padding is exercised.
+                controller.State.PinnedIds = controller.State.Apps.Take(4).Select(app => app.Id).ToList();
                 foreach (var position in new[] { "Bottom", "Top", "Left", "Right" })
                 {
                     controller.State.Settings.Position = position; dock.UpdateSettings(); await Frame();
@@ -458,6 +462,17 @@ internal static class Program
                     });
                 }
                 controller.State.Apps = original; controller.State.PinnedIds = original.Select(a => a.Id).ToList();
+                // The preceding fixture deliberately overflows at 160 DIP and
+                // scrolls to its final action. Material and auto-hide contracts
+                // below use a separate resting-size fixture that fits all pins.
+                controller.State.Settings.IconSize = 48;
+                dock.UpdateSettings(); await Frame();
+                Check("Returning from the oversized scrolling fixture retains every original pin", () =>
+                {
+                    Require(controller.State.PinnedIds.SequenceEqual(original.Select(app => app.Id)) && Tiles(dock).Length == original.Count + 1,
+                        "Resetting the independent material fixture dropped an application pin.");
+                    CheckBounds(dock);
+                });
                 controller.State.Settings.LiquidGlass = true;
                 controller.State.Settings.Opacity = .55; dock.UpdateSettings(); await Frame();
                 var lowTint = ((SolidColorBrush)Field<Border>(dock, "tint").Background).Color.A;

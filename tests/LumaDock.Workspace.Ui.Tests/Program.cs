@@ -18,7 +18,7 @@ using LumaDock.Windows;
 namespace LumaDock.Workspace.Ui.Tests;
 
 /// <summary>Own-window native contracts and rendered workspace layout; never moves user windows or files.</summary>
-internal static class Program
+internal static partial class Program
 {
     private const BindingFlags Private = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
     [STAThread] private static int Main(string[] args)
@@ -149,19 +149,28 @@ internal static class Program
                 dock.Closed += (_, _) => controllerDock.SetValue(controller, null);
                 dock.Show(); await Frame();
                 var dockHandle = new WindowInteropHelper(dock).Handle;
-                Check("The Dock grip requests native movement while app buttons keep their click-and-sort input", () =>
+                Check("The Dock grip and resize handle retain client input instead of invoking the OS caption move loop", () =>
                 {
                     var grip = (FrameworkElement)typeof(DockWindow).GetField("positionGrip", Private)!.GetValue(dock)!;
                     var gp = grip.PointToScreen(new Point(grip.ActualWidth / 2, grip.ActualHeight / 2));
-                    Require(Hit(dockHandle, (int)gp.X, (int)gp.Y) == 2, "The physical grip is not a native drag surface.");
+                    Require(Hit(dockHandle, (int)gp.X, (int)gp.Y) == 1, "The Dock grip still enters the OS caption movement loop that can clamp a taskbar drop.");
+                    var resize = (FrameworkElement)typeof(DockWindow).GetField("resizeGrip", Private)!.GetValue(dock)!;
+                    var rp = resize.PointToScreen(new Point(resize.ActualWidth / 2, resize.ActualHeight / 2));
+                    Require(resize.IsVisible && resize.ActualWidth > 0 && resize.ActualHeight > 0 && Hit(dockHandle, (int)rp.X, (int)rp.Y) == 1,
+                        "The visible resize handle does not keep its own client input.");
                     var button = Descendants(dock).OfType<Button>().First(element => element.Tag is AppEntry);
                     var bp = button.PointToScreen(new Point(button.ActualWidth / 2, button.ActualHeight / 2));
                     Require(Hit(dockHandle, (int)bp.X, (int)bp.Y) != 2, "Application input is intercepted by whole-Dock movement.");
+                    var localButton = dock.PointFromScreen(bp);
+                    Require(!(bool)typeof(DockWindow).GetMethod("IsPositionDragPoint", Private)!.Invoke(dock, [localButton])!
+                        && !(bool)typeof(DockWindow).GetMethod("IsResizeDragPoint", Private)!.Invoke(dock, [localButton])!,
+                        "Application buttons are incorrectly accepted by the client move or resize gesture filter.");
                     Require(SendMessage(dockHandle, 0x21, IntPtr.Zero, IntPtr.Zero).ToInt32() == 3 && (GetWindowLongPtr(dockHandle, -20).ToInt64() & 0x08000000) != 0, "Dock movement no longer preserves no-activate semantics.");
                 });
                 var monitor = MonitorService.GetMonitors().FirstOrDefault(m => m.IsPrimary) ?? MonitorService.GetMonitors().First();
                 var work = new DockWorkArea(monitor.WorkLeft, monitor.WorkTop, monitor.WorkWidth, monitor.WorkHeight);
                 var bounds = new DockWorkArea(monitor.Left, monitor.Top, monitor.Width, monitor.Height);
+                await DirectManipulationChecks(controller, dock, Path.Combine(root, "data"), monitor, Check, observations);
                 controller.State.Settings.DockPlacement = "Free"; controller.State.Settings.DockFreeBoundsVersion = 0;
                 controller.State.Settings.MonitorDevice = monitor.DeviceName;
                 controller.State.Settings.DockFreeX = .25; controller.State.Settings.DockFreeY = .9;
@@ -250,7 +259,7 @@ internal static class Program
             {
                 window?.ClosePermanently(); dock?.Close(); cover?.Close(); fixedWindow?.Close(); controller?.Dispose();
                 Directory.CreateDirectory(Path.GetDirectoryName(report)!);
-                File.WriteAllText(report, JsonSerializer.Serialize(new { passed = exit == 0, recordedAt = DateTimeOffset.Now, checks, errors, observations, onlyOwnedWindowsModified = true, userFilesChanged = false, systemSettingsChanged = false, appLaunches = 0, actualMouseDragTested = false, interpretation = "Actual own-window native hit codes and rendered WPF geometry. Free-placement command, persistence and native bounds are exercised without physical mouse injection. Synthetic multi-monitor geometry does not certify a real mixed-DPI monitor transition." }, new JsonSerializerOptions { WriteIndented = true }));
+                File.WriteAllText(report, JsonSerializer.Serialize(new { passed = exit == 0, recordedAt = DateTimeOffset.Now, checks, errors, observations, onlyOwnedWindowsModified = true, userFilesChanged = false, systemSettingsChanged = false, appLaunches = 0, actualMouseDragTested = false, directClientManipulationContractsTested = true, clientMessageAdapterContractsTested = true, interpretation = "Own-window client manipulation and queued client-message adapter entry points, real mouse capture, native bounds, cancellation and persistence; no physical mouse injection. The separate positioning-command checks and synthetic multi-monitor geometry do not certify Explorer mouse input or a real mixed-DPI monitor transition." }, new JsonSerializerOptions { WriteIndented = true }));
                 Console.WriteLine($"Workspace UI: {checks.Count} groups, {errors.Count} errors"); app.Shutdown();
             }
         };
