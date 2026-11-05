@@ -4,18 +4,18 @@
 
 <p align="center"><b>把整个桌面，变成你的主场</b></p>
 <p align="center">
-  <a href="https://github.com/FouHe0720/LumaDock/releases/tag/v0.11.2"><img src="https://img.shields.io/badge/Release-0.11.2-588e9d?style=flat-square" alt="Release 0.11.2"></a>
+  <a href="https://github.com/FouHe0720/LumaDock/releases/tag/v0.11.3"><img src="https://img.shields.io/badge/Release-0.11.3-588e9d?style=flat-square" alt="Release 0.11.3"></a>
   <img src="https://img.shields.io/badge/Windows-10%20%2F%2011%20x64-53798a?style=flat-square" alt="Windows 10 / 11 x64">
   <a href="https://github.com/FouHe0720/LumaDock/actions/workflows/build.yml"><img src="https://github.com/FouHe0720/LumaDock/actions/workflows/build.yml/badge.svg" alt="Windows build"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-7c8b82?style=flat-square" alt="MIT License"></a>
 </p>
 <p align="center">
-  <a href="https://github.com/FouHe0720/LumaDock/releases/download/v0.11.2/LumaDock-0.11.2-win-x64.zip"><img src="https://img.shields.io/badge/Download-Windows%20x64-3d7f84?style=for-the-badge" alt="下载 LumaDock Windows 便携版"></a>
+  <a href="https://github.com/FouHe0720/LumaDock/releases/download/v0.11.3/LumaDock-0.11.3-win-x64.zip"><img src="https://img.shields.io/badge/Download-Windows%20x64-3d7f84?style=for-the-badge" alt="下载 LumaDock Windows 便携版"></a>
 </p>
 <p align="center">完整解压即可运行 · 自带 .NET Runtime · 无需管理员权限 · 预发布</p>
 <p align="center">
   <a href="docs/USER-GUIDE.md">使用指南</a> ·
-  <a href="docs/RELEASE-0.11.2.md">本次更新</a> ·
+  <a href="docs/RELEASE-0.11.3.md">本次更新</a> ·
   <a href="docs/DEVELOPMENT.md">开发文档</a> ·
   <a href="docs/performance.md">性能记录</a>
 </p>
@@ -30,20 +30,22 @@ LumaDock 是一款原生 Windows Dock 与桌面管理工具。把常用软件和
   </tr>
 </table>
 
-## 0.11.2 · 移到哪，就停在哪
+## 0.11.3 · 小得下，也拿得稳
 
-Dock 改用自己的鼠标拖动处理，任务栏所在区域也可以放。移动时跟随指针，松手后保存落点；应用图标继续用于启动和排序。
+图标最小尺寸降至 **16 DIP**。小图标搭配更薄的玻璃底座，L 图标也一起收小，保留清楚的比例；常用尺寸的外观继续保持。
 
-底座右端增加缩放握柄，竖向摆放时位于下端。沿底座方向或向外侧拖动，图标与底座会一起连续变大、变小，范围为 **24–160 DIP**。缩放以可见底座中心为基准；按 **Esc** 可取消本次移动或缩放，恢复开始时的位置与尺寸。
+两端各留出 **32 DIP 空位**，把应用与操作握柄分开。左端移动，右端缩放；竖向摆放时分别在上端和下端。握柄的可抓取区域加宽到 24 DIP，悬停或滚动时也优先响应握柄，减少误点应用。
 
-预览复用已有图标和控件，松手后再保存并按当前尺寸请求系统图标。拖动中不会反复写配置，也没有新增常驻的鼠标检查。
+拖动末端可在 **16–160 DIP** 之间连续调整，图标与底座一起变化。松手后保存位置和大小；按 **Esc** 取消本次操作。自由摆放仍可进入任务栏所在区域，工作窗口继续保持在前。
+
+拖动中复用显示器信息、图标和控件，跳过坐标与 DPI 都未变化的重复更新；松手后再保存并更新清晰图标。不增加常驻输入轮询，也不逐帧写配置。
 
 ## 熟悉的工作台
 
 Logo、LumaDock 名称与项目介绍分别居中，三项之间留出更舒展的间距。介绍语仍是 **“把整个桌面，变成你的主场”**，应用库与桌面集保留熟悉的导航位置。
 
 ![LumaDock 0.11.1 工作台：独立居中品牌行、舒展间距与应用网格](docs/assets/workspace0111.jpg)
-<p align="center"><sub>0.11.1 工作台界面参考 · 品牌、导航与应用网格在新版保留。</sub></p>
+<p align="center"><sub>0.11.1 工作台历史界面参考 · 品牌、导航与应用网格在新版保留。</sub></p>
 
 把常用的本机文件夹，或指向它的快捷方式拖入 Dock，在任意两个图标之间松开即可固定。也可以在桌面集中右键文件夹 → **固定到 Dock**。点击后由 Windows 打开实际目录，原目录与内容不复制、不移动；应用库仍专注软件清单。
 
@@ -62,14 +64,14 @@ Dock 保持普通窗口层级；Windows 任务栏若处于上方，会遮住重�
 双击打开文件夹或文件；在空白处右键，新建文件夹或文本文档。选中项目后可以重命名、复制或复制路径，也可以将剪贴板中的文件复制到桌面。新建和重命名会作用于实际桌面，同名项目不会被覆盖。
 
 ![LumaDock 0.10.4 桌面集：真实文件夹、文件与右键新建](docs/assets/desktop0104.jpg)
-<p align="center"><sub>0.10.4 桌面集界面参考 · 文件与文件夹功能在新版工作台中保留。</sub></p>
+<p align="center"><sub>0.10.4 桌面集历史界面参考 · 文件与文件夹功能在新版工作台中保留。</sub></p>
 
 桌面集可见时监听文件变化，短暂合并变更后更新；离开这一页便停止监听，不持续扫描。应用库继续专注软件清单，自建栏目、固定顺序、字体和 Dock 外观保留。
 
 ### 应用和文件，各有去处
 
 ![LumaDock 0.10.3 应用库：三排布局、桌面集与快捷键说明](docs/assets/library0103.jpg)
-<p align="center"><sub>0.10.3 应用库界面参考 · 三排布局与快速启动提示继续保留。</sub></p>
+<p align="center"><sub>0.10.3 应用库历史界面参考 · 三排布局与快速启动提示继续保留。</sub></p>
 
 应用库汇集已发现与手动添加的程序，支持搜索、多选添加和自建栏目。桌面集按实际路径展示文件，不把同名文档合并成一个项目。文件夹复制、其他文件模板及完整系统文件菜单可点击“打开桌面”使用资源管理器。
 
@@ -80,7 +82,7 @@ Dock 延续普通窗口层级。打开其他软件时，工作窗口在上方；
 圆润的胶囊、交错的卵石、利落的轨道。当前图标随指针放大、向内抬起，相邻图标轻轻让位；停稳后动画收住。
 
 ![LumaDock 0.10.3：悬停放大与增强图标倒影](docs/assets/dock0103.jpg)
-<p align="center"><sub>0.10.3 Dock 界面参考 · 真实指针悬停与 90% 倒影，外观设置在新版中保留。</sub></p>
+<p align="center"><sub>0.10.3 Dock 历史界面参考 · 真实指针悬停与 90% 倒影，外观设置在新版中保留。</sub></p>
 
 在 **偏好设置 → Dock** 调整悬停、倒影与图标鲜艳度；在 **材质** 调整主题、强调色、浓度和图标密度。倒影强度上限提高到 **95%**，新配置默认 50%；底座浓度可低至 **2%**，图标本身保持清楚。既有偏好继续保存，按自己的壁纸明暗调整即可。
 
@@ -90,7 +92,7 @@ Dock 延续普通窗口层级。打开其他软件时，工作窗口在上方；
 
 ## 三步开始
 
-1. [下载 Windows 便携版](https://github.com/FouHe0720/LumaDock/releases/download/v0.11.2/LumaDock-0.11.2-win-x64.zip)，**完整解压**到准备长期保留的可写文件夹。
+1. [下载 Windows 便携版](https://github.com/FouHe0720/LumaDock/releases/download/v0.11.3/LumaDock-0.11.3-win-x64.zip)，**完整解压**到准备长期保留的可写文件夹。
 2. 双击 **LumaDock.exe**，等待首次扫描。便携包包含 .NET Desktop Runtime，普通使用无需 SDK、IDE、字体包或额外主题工具。
 3. 点击 Dock 左端的 L 图标，或按 **Ctrl + Alt + Space** 打开应用库。右键常用应用 → **固定到 Dock**；未扫描到的程序通过“添加应用”选择路径。
 
@@ -114,7 +116,7 @@ cd LumaDock
 | 调整工作台大小 | 拖窗口边缘或四角；右上角可最大化与还原 |
 | 设置每行应用数 | **偏好设置 → 应用整理**，最高 20 个，按窗口宽度自适应 |
 | 移动整个 Dock | 拖移动握柄或底座空白处，松开保存位置；自由摆放可进入任务栏区域 |
-| 改变 Dock 与图标大小 | 拖右端缩放握柄；竖向摆放时拖下端，连续调整至 24–160 DIP |
+| 改变 Dock 与图标大小 | 拖右端空位中的缩放握柄；竖向摆放时拖下端，连续调整至 16–160 DIP |
 | 取消本次移动或缩放 | 松手前按 **Esc**，回到操作前的位置与尺寸 |
 | 恢复 Dock 到屏幕底部 | 双击握柄／底座空白处，或 **偏好设置 → Dock → 恢复位置** |
 | 查看桌面的文件与文件夹 | 左侧 **桌面集**，搜索名称，双击打开 |
@@ -144,11 +146,11 @@ cd LumaDock
 
 指针停稳后，悬停和边缘流光停止动画。运行标记保持静态显示，不靠持续闪烁吸引注意。没有大型浏览器运行时，也没有额外后台服务。
 
-**0.11.2 本机实测：** 常规 58 DIP Dock 静置时，平均全机 CPU **0.00802%**，私有工作集峰值 **49.7 MB**；160 DIP 大图标为 **53.4 MB**；最大化、每行 20 个的应用库前台静置为 **94.7 MB**，平均全机 CPU **0.00553%**。
+**0.11.3 本机实测：** 16 DIP 小尺寸 Dock 静置时，私有工作集峰值 **47.7 MB**、平均全机 CPU **0.00880%**；58 DIP 常规尺寸为 **48.8 MB**、**0.02078%**。
 
-三轮使用同一最终程序，各固定 2 个程序与 1 个实际文件夹，倒影 90%、底座浓度 4%。分别预热 20、20、120 秒后请求采样 30 秒；宽网格轮全程为 2560×1392、96 DPI 且处于前台。私有工作集与总工作集、私有提交不同，完整数值和条件见记录；短测不代表持续操作、所有设备或过夜驻留。
+两轮使用同一最终程序，固定 2 个程序和 1 个实际文件夹，倒影 90%、底座浓度 4%；各预热 20 秒后请求采样 30 秒。私有工作集与总工作集、私有提交不同，完整口径见记录；静置短测不代表持续操作、所有设备或过夜驻留。
 
-本版通过 **353 项组件与 WPF 检查**，另有 **14 组批量导入、100 轮窗口生命周期**。实际鼠标对照验证了任务栏落点、松手保存、放大缩小与独立进程恢复。[查看检查范围 →](docs/validation.md)
+本版 **281 项定向组件与 WPF 检查**通过，另以实际鼠标验证小尺寸下的握柄移动、放大与缩回最小值。旧版的其他检查单独保留为历史记录。[查看检查范围 →](docs/validation.md)
 
 性能数字来自 Windows 实测，报告保留采样条件与程序集校验值。短测、交互检查与长期驻留的边界分别记录，见 [性能记录](docs/performance.md) 和 [验证范围](docs/validation.md)。
 

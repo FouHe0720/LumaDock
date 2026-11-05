@@ -28,7 +28,7 @@ public sealed partial class DockWindow : Window
     private readonly ScrollViewer scroll = new() { HorizontalScrollBarVisibility = ScrollBarVisibility.Hidden, VerticalScrollBarVisibility = ScrollBarVisibility.Disabled, CanContentScroll = false };
     private readonly Canvas dropOverlay = new() { IsHitTestVisible = false };
     private readonly Border insertionCue = new() { CornerRadius = new CornerRadius(2), Visibility = Visibility.Collapsed, BorderThickness = new Thickness(1) };
-    private readonly Border positionGrip = new() { Width = 12, Height = 28, CornerRadius = new CornerRadius(6), Background = Brushes.Transparent, Opacity = .55 };
+    private readonly Border positionGrip = new() { Width = 24, Height = 28, CornerRadius = new CornerRadius(6), Background = Brushes.Transparent, Opacity = .65 };
     private sealed class Tile
     {
         public AppEntry? App; public IReadOnlyList<AppEntry> Variants = []; public required Button Button; public required FrameworkElement Visual;
@@ -71,10 +71,10 @@ public sealed partial class DockWindow : Window
         var gripMark = new Border { Width = 3, Height = 16, CornerRadius = new CornerRadius(1.5), HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
         gripMark.SetResourceReference(Border.BackgroundProperty, "CaptionBrush"); positionGrip.Child = gripMark;
         positionGrip.ToolTip = "拖动握柄或空白处，自由摆放 Dock；双击恢复底部居中";
-        AutomationProperties.SetName(positionGrip, "拖动 Dock"); body.Children.Add(positionGrip);
+        AutomationProperties.SetName(positionGrip, "拖动 Dock");
         InitializeDirectManipulation();
         dropOverlay.Children.Add(insertionCue);
-        var surface = new Grid(); surface.Children.Add(plate); surface.Children.Add(body); surface.Children.Add(finish); surface.Children.Add(scroll); surface.Children.Add(dropOverlay); surface.Children.Add(resizeGrip); Content = surface;
+        var surface = new Grid(); surface.Children.Add(plate); surface.Children.Add(body); surface.Children.Add(finish); surface.Children.Add(scroll); surface.Children.Add(dropOverlay); surface.Children.Add(positionGrip); surface.Children.Add(resizeGrip); Content = surface;
         body.SizeChanged += (_, _) => UpdateContour();
         hover.Tick += HoverTick;
         PreviewMouseWheel += (_, e) => { if (Vertical) scroll.ScrollToVerticalOffset(scroll.VerticalOffset - e.Delta); else scroll.ScrollToHorizontalOffset(scroll.HorizontalOffset - e.Delta); e.Handled = true; };
@@ -128,6 +128,7 @@ public sealed partial class DockWindow : Window
         }
         if (msg == 0x001F /* WM_CANCELMODE */ || msg == 0x0215 /* WM_CAPTURECHANGED */ && l != handle)
             EndDirectManipulation(true);
+        if (msg == 0x007E /* WM_DISPLAYCHANGE */) EndDirectManipulation(true);
         if (msg == 0x2E0) Dispatcher.BeginInvoke(() => { if (positionDragging) { rebuildAfterDrag = true; QueueDirectUpdate(lastManipulationPoint); return; } Rebuild(); liquid.Refresh(); });
         return IntPtr.Zero;
     }
@@ -142,6 +143,8 @@ public sealed partial class DockWindow : Window
     private bool IsPositionDragPoint(Point point)
     {
         if (closed || positionDragging || !IsVisible || !double.IsFinite(point.X) || !double.IsFinite(point.Y)) return false;
+        var gripOrigin = positionGrip.TranslatePoint(new Point(), this);
+        if (positionGrip.IsVisible && new Rect(gripOrigin, positionGrip.RenderSize).Contains(point)) return true;
         var local = new Point(point.X - body.Margin.Left, point.Y - body.Margin.Top);
         if (local.X < 0 || local.Y < 0 || local.X >= body.ActualWidth || local.Y >= body.ActualHeight || body.Clip?.FillContains(local) == false) return false;
         for (DependencyObject? element = InputHitTest(point) as DependencyObject; element != null;)
@@ -229,7 +232,7 @@ public sealed partial class DockWindow : Window
             scroll.VerticalScrollBarVisibility = Vertical ? ScrollBarVisibility.Hidden : ScrollBarVisibility.Disabled;
             var s = controller.State.Settings;
             UpdateDockMetrics();
-            var launcher = AddTile(null, LaunchpadMark(s.IconSize * .69));
+            var launcher = AddTile(null, LaunchpadMark(LauncherIconSize(s.IconSize)));
             launcher.Button.Click += (_, _) => controller.ShowCenter();
             var resting = (s.Position is "Bottom" or "Right" ? flight : 12) + bodyThickness / 2 - (s.Position is "Bottom" or "Right" ? 2 : -2);
             var groups = ApplicationPresentation.Group(controller.State.Apps.Where(a => !a.Hidden && a.IsAvailable));
@@ -362,9 +365,10 @@ public sealed partial class DockWindow : Window
         items.Children.Add(button); tiles.Add(tile); return tile;
     }
 
+    private static double LauncherIconSize(double size) => Math.Min(size, size * .69 + 9);
     private FrameworkElement LaunchpadMark(double size)
     {
-        var image = new System.Windows.Controls.Image { Width = size + 9, Height = size + 9, Source = BrandIcon, Stretch = Stretch.Uniform, IsHitTestVisible = false };
+        var image = new System.Windows.Controls.Image { Width = size, Height = size, Source = BrandIcon, Stretch = Stretch.Uniform, IsHitTestVisible = false };
         RenderOptions.SetBitmapScalingMode(image, BitmapScalingMode.HighQuality);
         return image;
     }
@@ -411,12 +415,12 @@ public sealed partial class DockWindow : Window
     private void RepositionCore(MonitorInfo? preferredMonitor = null, Point? glassCenter = null)
     {
         if (handle == IntPtr.Zero) return;
-        var monitors = MonitorService.GetMonitors();
+        var monitors = preferredMonitor is null ? MonitorService.GetMonitors() : [];
         var monitor = preferredMonitor ?? monitors.FirstOrDefault(m => m.DeviceName == controller.State.Settings.MonitorDevice) ?? monitors.FirstOrDefault(m => m.IsPrimary) ?? monitors.FirstOrDefault();
         if (monitor == null) return;
         var dpi = Native.GetDpiForWindow(handle) / 96.0; if (dpi < .5) dpi = 1;
         var s = controller.State.Settings;
-        var length = tiles.Count * (s.IconSize + s.Spacing + 12) + (tiles.Count > 1 ? 19 : 0) + 28 + endReserve * 2;
+        var length = tiles.Count * (s.IconSize + s.Spacing + 12) + (tiles.Count > 1 ? 19 : 0) + GripLane * 2 + endReserve * 2;
         var thickness = bodyThickness + flight + 12;
         var available = positionDragging || FreePlacement && s.DockFreeBoundsVersion == 1 ? MonitorBounds(monitor) : WorkArea(monitor);
         fullWidth = Vertical ? thickness : Math.Min(length, available.Width / dpi - 16);
@@ -432,13 +436,15 @@ public sealed partial class DockWindow : Window
             _ => new Thickness(endReserve, flight, endReserve, 12)
         };
         body.Margin = plate.Margin = finish.Margin = margin;
-        positionGrip.Width = Vertical ? 28 : 12; positionGrip.Height = Vertical ? 12 : 28;
+        var gripCross = Math.Clamp(bodyThickness - 10, 22, 36);
+        positionGrip.Width = Vertical ? gripCross : 24; positionGrip.Height = Vertical ? 24 : gripCross;
         positionGrip.HorizontalAlignment = Vertical ? HorizontalAlignment.Center : HorizontalAlignment.Left;
         positionGrip.VerticalAlignment = Vertical ? VerticalAlignment.Top : VerticalAlignment.Center;
-        positionGrip.Margin = Vertical ? new Thickness(0, 3, 0, 0) : new Thickness(3, 0, 0, 0);
-        if (positionGrip.Child is Border mark) { mark.Width = Vertical ? 16 : 3; mark.Height = Vertical ? 3 : 16; }
+        positionGrip.Margin = new Thickness(margin.Left + 4, margin.Top + 4, margin.Right + 4, margin.Bottom + 4);
+        positionGrip.Visibility = tucked ? Visibility.Collapsed : Visibility.Visible;
+        if (positionGrip.Child is Border mark) { mark.Width = Vertical ? Math.Min(16, gripCross - 8) : 3; mark.Height = Vertical ? 3 : Math.Min(16, gripCross - 8); }
         ArrangeResizeGrip();
-        items.Margin = tucked ? new Thickness(0) : Vertical ? new Thickness(0, endReserve + 14, 0, endReserve + 14) : new Thickness(endReserve + 14, 0, endReserve + 14, 0);
+        items.Margin = tucked ? new Thickness(0) : Vertical ? new Thickness(0, endReserve + GripLane, 0, endReserve + GripLane) : new Thickness(endReserve + GripLane, 0, endReserve + GripLane, 0);
         foreach (var layer in new[] { plate, finish })
         {
             layer.Shape = s.DockShape; layer.Radius = radius; layer.Accent = Theme.AccentColor; layer.Dark = Theme.IsDark; layer.Vertical = Vertical; layer.OutwardEnd = s.Position is "Bottom" or "Right"; layer.InvalidateVisual();
@@ -494,6 +500,11 @@ public sealed partial class DockWindow : Window
         if (positionDragging) return;
         if (!controller.ReducedMotion) highlight.TrackPointer(e.GetPosition(highlight));
         if (controller.ReducedMotion || tucked || dragging || positionDragging) return;
+        var point = e.GetPosition(this);
+        if (IsResizeDragPoint(point) || IsPositionDragPoint(point))
+        {
+            lastPointer = new(double.NaN, double.NaN); ResetMagnification(); return;
+        }
         var p = e.GetPosition(items);
         if (double.IsFinite(lastPointer.X) && Math.Abs(p.X - lastPointer.X) < .25 && Math.Abs(p.Y - lastPointer.Y) < .25) return;
         lastPointer = p; SetTargets(p);

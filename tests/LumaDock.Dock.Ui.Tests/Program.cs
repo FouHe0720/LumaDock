@@ -411,6 +411,27 @@ internal static class Program
                     }
                     Call(dock, "ResetMagnification"); await Settle();
                 }
+                controller.State.Settings.IconSize = 16; controller.State.Settings.AnimationStrength = 1;
+                foreach (var position in new[] { "Bottom", "Top", "Left", "Right" })
+                {
+                    controller.State.Settings.Position = position; dock.UpdateSettings(); await Frame();
+                    foreach (var tile in new[] { Tiles(dock)[0], Tiles(dock)[^1] })
+                    {
+                        MoveTo(dock, tile); await Settle();
+                        Check($"Minimum-size {position} {(Field<AppEntry?>(tile, "App") == null ? "launcher" : "last application")} hover stays clear and within its window", () =>
+                        {
+                            Require(Math.Abs(controller.State.Settings.IconSize - 16) < .01, "The tiny Dock was clamped back to 24 DIP.");
+                            var icon = Field<FrameworkElement>(tile, "Icon");
+                            Require(icon.ActualWidth > 0 && icon.ActualHeight > 0 && icon.ActualWidth <= 16.5 && icon.ActualHeight <= 16.5,
+                                "The tiny launcher or application kept an icon larger than the selected size.");
+                            Require(Field<ScaleTransform>(tile, "Scale").ScaleX > 1.89, "The tiny icon lost its strongest hover response.");
+                            CheckBounds(dock); CheckReflectionBounds(dock);
+                            Require(!Field<DispatcherTimer>(dock, "hover").IsEnabled, "Minimum-size hover retained a running clock after settling.");
+                            Layouts.Add(Snapshot(dock, controller.State.Settings.DockShape, position));
+                        });
+                    }
+                    Call(dock, "ResetMagnification"); await Settle();
+                }
                 controller.State.Settings.IconSize = 160; controller.State.Settings.AnimationStrength = 1;
                 // This fixture checks maximum-size hover, not scrolling. Keep
                 // five actions (launcher plus four apps) inside both monitor axes.

@@ -13,14 +13,18 @@ namespace LumaDock.App;
 
 public sealed partial class DockWindow
 {
-    public const double MinimumIconSize = 24;
+    public const double MinimumIconSize = 16;
     public const double MaximumIconSize = 160;
-    private readonly Border resizeGrip = new() { Width = 12, Height = 28, CornerRadius = new CornerRadius(6), Background = Brushes.Transparent, Opacity = .7, Cursor = Cursors.SizeNWSE };
+    private const double GripLane = 32;
+    private readonly Border resizeGrip = new() { Width = 24, Height = 28, CornerRadius = new CornerRadius(6), Background = Brushes.Transparent, Opacity = .7, Cursor = Cursors.SizeNWSE };
     private sealed record ManipulationOrigin(DockFrame Frame, string Placement, string Monitor, int BoundsVersion,
         double X, double Y, double IconSize, double Dpi, Point Pointer, Point GlassCenter, Size GlassSize);
     private ManipulationOrigin? manipulationOrigin;
     private MonitorInfo? manipulationMonitor;
+    private IReadOnlyList<MonitorInfo>? manipulationMonitors;
     private Point lastManipulationPoint;
+    private Point? lastAppliedManipulationPoint;
+    private uint lastAppliedManipulationDpi;
     private bool resizeDragging, endingManipulation, directUpdateQueued, manipulationCancelRequested;
     private int manipulationEpoch;
     private Cursor? manipulationCursor;
@@ -74,29 +78,42 @@ public sealed partial class DockWindow
 
     private void ArrangeResizeGrip()
     {
-        resizeGrip.Width = Vertical ? 28 : 12; resizeGrip.Height = Vertical ? 12 : 28;
+        var cross = Math.Clamp(bodyThickness - 10, 22, 36);
+        resizeGrip.Width = Vertical ? cross : 24; resizeGrip.Height = Vertical ? 24 : cross;
         resizeGrip.HorizontalAlignment = Vertical ? HorizontalAlignment.Center : HorizontalAlignment.Right;
         resizeGrip.VerticalAlignment = Vertical ? VerticalAlignment.Bottom : VerticalAlignment.Center;
-        resizeGrip.Margin = new Thickness(body.Margin.Left + 3, body.Margin.Top + 3, body.Margin.Right + 3, body.Margin.Bottom + 3);
+        resizeGrip.Margin = new Thickness(body.Margin.Left + 4, body.Margin.Top + 4, body.Margin.Right + 4, body.Margin.Bottom + 4);
         resizeGrip.Visibility = tucked ? Visibility.Collapsed : Visibility.Visible;
-        if (resizeGrip.Child is Border mark) { mark.Width = Vertical ? 16 : 3; mark.Height = Vertical ? 3 : 16; }
+        if (resizeGrip.Child is Border mark) { mark.Width = Vertical ? Math.Min(16, cross - 8) : 3; mark.Height = Vertical ? 3 : Math.Min(16, cross - 8); }
     }
 
     /// <summary>Own-window client capture, in physical screen pixels. No native caption loop or Shell snapping.</summary>
     public bool BeginDirectManipulation(Point screen, bool resize)
     {
         if (closed || positionDragging || dragging || tucked || !IsVisible || handle == IntPtr.Zero || !Finite(screen) || WindowFrame() is not { } frame) return false;
-        var dpi = Math.Max(1, Native.GetDpiForWindow(handle)) / 96d;
+        var monitors = MonitorService.GetMonitors();
+        if (monitors.Count == 0) return false;
+        var nativeDpi = Math.Max(1u, Native.GetDpiForWindow(handle));
+        var dpi = nativeDpi / 96d;
         var glass = GlassFrame(frame, dpi); var settings = controller.State.Settings;
         manipulationOrigin = new(frame, settings.DockPlacement, settings.MonitorDevice, settings.DockFreeBoundsVersion,
             settings.DockFreeX, settings.DockFreeY, settings.IconSize, dpi, screen,
             new Point(glass.X + glass.Width / 2d, glass.Y + glass.Height / 2d), new Size(glass.Width, glass.Height));
-        manipulationMonitor = MonitorForPoint(screen);
+        // Geometry stays fixed for this gesture; WM_DISPLAYCHANGE cancels the
+        // capture before a stale monitor snapshot could be persisted.
+        manipulationMonitors = monitors;
+        manipulationMonitor = MonitorForPoint(screen, monitors);
+        lastAppliedManipulationPoint = screen; lastAppliedManipulationDpi = nativeDpi;
         lastManipulationPoint = screen; resizeDragging = resize; manipulationCancelRequested = false;
         manipulationCursor = Cursor; positionDragging = true; manipulationEpoch++;
         try
         {
-            if (!CaptureMouse()) { positionDragging = false; resizeDragging = false; manipulationOrigin = null; return false; }
+            if (!CaptureMouse())
+            {
+                positionDragging = false; resizeDragging = false; manipulationOrigin = null;
+                manipulationMonitor = null; manipulationMonitors = null; lastAppliedManipulationPoint = null; lastAppliedManipulationDpi = 0;
+                return false;
+            }
             Cursor = resize ? Cursors.SizeNWSE : Cursors.SizeAll;
             hideDelay.Stop(); StopHover(); highlight.StopMotion(); ClearInsertion();
             StartManipulationKeys(); NativeWindowHelper.ApplyDockLayer(handle); return true;
@@ -108,10 +125,20 @@ public sealed partial class DockWindow
     }
 
     private static bool Finite(Point point) => double.IsFinite(point.X) && double.IsFinite(point.Y);
-    private static MonitorInfo? MonitorForPoint(Point point) => MonitorService.GetMonitors()
-        .OrderBy(monitor => Math.Pow(point.X - Math.Clamp(point.X, monitor.Left, monitor.Left + monitor.Width), 2)
-            + Math.Pow(point.Y - Math.Clamp(point.Y, monitor.Top, monitor.Top + monitor.Height), 2))
-        .ThenByDescending(monitor => monitor.IsPrimary).FirstOrDefault();
+    private static MonitorInfo? MonitorForPoint(Point point, IReadOnlyList<MonitorInfo> monitors)
+    {
+        MonitorInfo? closest = null; var closestDistance = double.MaxValue;
+        for (var index = 0; index < monitors.Count; index++)
+        {
+            var monitor = monitors[index];
+            var dx = point.X - Math.Clamp(point.X, monitor.Left, monitor.Left + monitor.Width);
+            var dy = point.Y - Math.Clamp(point.Y, monitor.Top, monitor.Top + monitor.Height);
+            var distance = dx * dx + dy * dy;
+            if (distance < closestDistance || distance == closestDistance && monitor.IsPrimary && closest?.IsPrimary != true)
+            { closest = monitor; closestDistance = distance; }
+        }
+        return closest;
+    }
     private DockFrame GlassFrame(DockFrame frame, double dpi) => new(
         frame.X + (int)Math.Round(body.Margin.Left * dpi), frame.Y + (int)Math.Round(body.Margin.Top * dpi),
         Math.Max(1, frame.Width - (int)Math.Round((body.Margin.Left + body.Margin.Right) * dpi)),
@@ -135,9 +162,11 @@ public sealed partial class DockWindow
         if (!positionDragging || endingManipulation || manipulationOrigin is not { } origin || !Finite(screen)) return;
         if (manipulationCancelRequested) { EndDirectManipulation(true); return; }
         lastManipulationPoint = screen;
-        manipulationMonitor = resizeDragging
-            ? MonitorService.GetMonitors().FirstOrDefault(candidate => candidate.DeviceName == manipulationMonitor?.DeviceName) ?? MonitorForPoint(origin.GlassCenter)
-            : MonitorForPoint(screen) ?? manipulationMonitor;
+        var nativeDpi = Math.Max(1u, Native.GetDpiForWindow(handle));
+        if (lastAppliedManipulationPoint == screen && lastAppliedManipulationDpi == nativeDpi) return;
+        lastAppliedManipulationPoint = screen; lastAppliedManipulationDpi = nativeDpi;
+        if (!resizeDragging && manipulationMonitors is { } monitors)
+            manipulationMonitor = MonitorForPoint(screen, monitors) ?? manipulationMonitor;
         if (manipulationMonitor is not { } monitor) return;
         if (resizeDragging)
         {
@@ -152,7 +181,7 @@ public sealed partial class DockWindow
         }
         else
         {
-            var ratio = Math.Max(1, Native.GetDpiForWindow(handle)) / 96d / origin.Dpi;
+            var ratio = nativeDpi / 96d / origin.Dpi;
             var proposed = new DockFrame((int)Math.Round(screen.X - (origin.Pointer.X - origin.Frame.X) * ratio),
                 (int)Math.Round(screen.Y - (origin.Pointer.Y - origin.Frame.Y) * ratio),
                 Math.Max(1, (int)Math.Round(origin.Frame.Width * ratio)), Math.Max(1, (int)Math.Round(origin.Frame.Height * ratio)));
@@ -192,7 +221,8 @@ public sealed partial class DockWindow
         {
             StopManipulationKeys(); positionDragging = false; resizeDragging = false;
             manipulationEpoch++; directUpdateQueued = false; manipulationCancelRequested = false;
-            manipulationOrigin = null; manipulationMonitor = null;
+            manipulationOrigin = null; manipulationMonitor = null; manipulationMonitors = null;
+            lastAppliedManipulationPoint = null; lastAppliedManipulationDpi = 0;
             if (IsMouseCaptured) ReleaseMouseCapture();
             Cursor = manipulationCursor; endingManipulation = false;
         }
@@ -213,7 +243,8 @@ public sealed partial class DockWindow
     private void UpdateDockMetrics()
     {
         var settings = controller.State.Settings;
-        bodyThickness = settings.IconSize + (settings.DockShape == "Rail" ? 36 : 42);
+        var padding = Math.Min(settings.DockShape == "Rail" ? 36 : 42, 16 + Math.Max(0, settings.IconSize - 16) * 1.1);
+        bodyThickness = settings.IconSize + padding;
         flight = Math.Ceiling(settings.IconSize * settings.AnimationStrength * .80) + 8;
         // The old <=80 DIP reserve clipped the halo above ~106 DIP. Bound the
         // actual retained visual and lift rather than assuming a fixed fraction.
@@ -237,7 +268,7 @@ public sealed partial class DockWindow
             tile.Button.Width = tile.Cell.Width = Vertical ? cross : cell;
             tile.Button.Height = tile.Cell.Height = Vertical ? cell : cross;
             tile.Visual.Width = tile.Visual.Height = size + 10;
-            tile.Icon.Width = tile.Icon.Height = tile.App == null ? size * .69 + 9 : size;
+            tile.Icon.Width = tile.Icon.Height = tile.App == null ? LauncherIconSize(size) : size;
             tile.Visual.Margin = Vertical ? new Thickness(resting - (size + 10) / 2, 0, 0, 0) : new Thickness(0, resting - (size + 10) / 2, 0, 0);
             tile.Dot.Margin = Vertical ? new Thickness(settings.Position == "Left" ? 15 : cross - 21, 0, 0, 0)
                 : new Thickness(0, settings.Position == "Top" ? 15 : cross - 21, 0, 0);

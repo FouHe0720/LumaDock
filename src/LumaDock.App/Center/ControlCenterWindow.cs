@@ -706,7 +706,7 @@ public sealed partial class ControlCenterWindow : Window
         SelectRow(stack, "主题", "", new[] { ("System", "跟随系统"), ("Dark", "深色"), ("Light", "浅色") }, settings.Theme, value => settings.Theme = value);
         SliderRow(stack, "Dock 浓度", .02, 1, settings.Opacity, value => settings.Opacity = value, value => $"{value:P0}", "数值越低，底座越通透；图标保持清楚");
         SliderRow(stack, "圆角", 8, 36, settings.CornerRadius, value => settings.CornerRadius = value, value => $"{value:0} px");
-        SliderRow(stack, "图标大小", 24, 160, settings.IconSize, value => settings.IconSize = value, value => $"{value:0} DIP");
+        SliderRow(stack, "图标大小", 16, 160, settings.IconSize, value => settings.IconSize = value, value => $"{value:0} DIP");
         SliderRow(stack, "图标间距", 3, 24, settings.Spacing, value => settings.Spacing = value, value => $"{value:0} px");
         var dockHeading = Section(stack, "Dock", "");
         DockShapeRow(stack);

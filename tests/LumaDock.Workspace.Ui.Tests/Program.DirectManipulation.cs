@@ -39,8 +39,11 @@ internal static partial class Program
                     "The direct move did not own both WPF and native mouse capture.");
                 Require(!Field<DispatcherTimer>(dock, "hover").IsEnabled && !Field<DispatcherTimer>(dock, "hideDelay").IsEnabled,
                     "Direct manipulation left hover or auto-hide work active.");
+                Require(Field<object?>(dock, "manipulationMonitors") is System.Collections.IEnumerable monitors && monitors.Cast<object>().Any(),
+                    "The direct gesture did not snapshot its available monitor geometry.");
             });
             if (!dock.IsPositionDragging) return;
+            var monitorSnapshot = Field<object?>(dock, "manipulationMonitors");
             dock.UpdateDirectManipulation(new Point(start.X + 90, start.Y - 75)); dock.UpdateLayout();
             check("Client pointer movement follows physical deltas without persisting every update", () =>
             {
@@ -51,8 +54,23 @@ internal static partial class Program
                     "The pointer-move preview wrote the configuration before release.");
                 Require(generation == Field<int>(dock, "generation") && SameObjects(tiles, DockTileButtons(dock)) && SameObjects(images, DockIconImages(dock)),
                     "Moving the Dock recreated its application buttons or images.");
+                Require(ReferenceEquals(monitorSnapshot, Field<object?>(dock, "manipulationMonitors")),
+                    "Pointer movement replaced the gesture's monitor snapshot instead of reusing it.");
             });
             var moved = NativeFrame(handle);
+            var positionMessages = 0;
+            HwndSourceHook geometry = (IntPtr window, int message, IntPtr wparam, IntPtr lparam, ref bool handled) =>
+            { if (message is 0x0046 or 0x0047) positionMessages++; return IntPtr.Zero; };
+            var nativeSource = HwndSource.FromHwnd(handle)!; nativeSource.AddHook(geometry);
+            try
+            {
+                for (var index = 0; index < 24; index++) dock.UpdateDirectManipulation(new Point(start.X + 90, start.Y - 75));
+                check("Duplicate stationary pointer samples cause no extra native positioning work", () =>
+                    Require(positionMessages == 0 && SameFrame(moved, NativeFrame(handle))
+                        && ReferenceEquals(monitorSnapshot, Field<object?>(dock, "manipulationMonitors")),
+                        "Unchanged pointer samples repositioned the HWND or replaced the monitor snapshot."));
+            }
+            finally { nativeSource.RemoveHook(geometry); }
             dock.Rebuild(); dock.Reposition(); dock.RefreshWindows(); dock.UpdateLayout();
             check("Refresh and relayout requests cannot override an in-progress client drag", () =>
             {
@@ -68,6 +86,7 @@ internal static partial class Program
                 Require(SameFrame(moved, NativeFrame(handle)), "Releasing the client drag bounced back to another position.");
                 var saved = new StateStore(data).Load().Settings;
                 Require(saved.DockPlacement == "Free" && saved.DockFreeBoundsVersion == 1, "The pointer release did not persist free positioning.");
+                Require(Field<object?>(dock, "manipulationMonitors") == null, "A completed gesture retained its temporary monitor snapshot.");
             });
             dock.Rebuild(); dock.Reposition(); await Frame();
             check("The released move remains at its drop after another queued refresh", () =>
@@ -198,6 +217,15 @@ internal static partial class Program
                 Require(!dock.IsPositionDragging && GetCapture() != handle && commits == 0 && SameFrame(cancelledFrame, NativeFrame(handle))
                     && bytes.SequenceEqual(File.ReadAllBytes(configPath)), "Capture loss left an active drag, moved the saved Dock, or wrote a cancelled position.");
             });
+            start = GripPoint(dock, "positionGrip");
+            Require(dock.BeginDirectManipulation(start, false), "Could not begin the owned display-change cancellation check.");
+            dock.UpdateDirectManipulation(new Point(start.X + 80, start.Y + 50));
+            SendMessage(handle, 0x007e, IntPtr.Zero, IntPtr.Zero); await Frame();
+            check("An owned display-change message cancels stale monitor geometry without saving the preview", () =>
+                Require(!dock.IsPositionDragging && !dock.IsSizeDragging && GetCapture() != handle
+                    && Field<object?>(dock, "manipulationMonitors") == null && commits == 0
+                    && SameFrame(cancelledFrame, NativeFrame(handle)) && bytes.SequenceEqual(File.ReadAllBytes(configPath)),
+                    "A display-change message retained stale capture or persisted the interrupted preview."));
             start = GripPoint(dock, "positionGrip"); commits = 0;
             Require(dock.BeginDirectManipulation(start, false), "Could not begin a stationary pointer gesture.");
             dock.EndDirectManipulation(); await Frame();

@@ -50,6 +50,13 @@ Test("Normalize constrains hostile settings", () =>
     Assert(s.Settings.Opacity == .70 && s.Settings.IconSize == 160 && s.Settings.Spacing == 4 && s.Settings.CornerRadius == 24);
     Assert(s.Settings.AnimationStrength == 1 && s.Settings.Columns == 20 && s.Settings.Theme == "System" && s.Settings.Position == "Bottom");
 });
+Test("Compact Dock accepts 16 DIP and persists fractional sizes", () =>
+{
+    var state = new AppState { Settings = new() { IconSize = 8 } };
+    Catalog.Normalize(state); Assert(state.Settings.IconSize == 16);
+    state.Settings.IconSize = 19.75; Catalog.Normalize(state); Assert(state.Settings.IconSize == 19.75);
+    var store = Store("compact-dock"); store.Save(state); Assert(store.Load().Settings.IconSize == 19.75);
+});
 Test("Normalize retains custom categories and removes duplicate apps", () =>
 {
     var s = new AppState { Apps = [Entry("a", category: "我的分组"), Entry("A")], Categories = ["", "其他", "其他"] };

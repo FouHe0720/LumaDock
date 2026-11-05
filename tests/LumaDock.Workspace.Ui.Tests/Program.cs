@@ -170,6 +170,7 @@ internal static partial class Program
                 var monitor = MonitorService.GetMonitors().FirstOrDefault(m => m.IsPrimary) ?? MonitorService.GetMonitors().First();
                 var work = new DockWorkArea(monitor.WorkLeft, monitor.WorkTop, monitor.WorkWidth, monitor.WorkHeight);
                 var bounds = new DockWorkArea(monitor.Left, monitor.Top, monitor.Width, monitor.Height);
+                await CompactDockChecks(controller, dock, Path.Combine(root, "data"), Check, observations);
                 await DirectManipulationChecks(controller, dock, Path.Combine(root, "data"), monitor, Check, observations);
                 controller.State.Settings.DockPlacement = "Free"; controller.State.Settings.DockFreeBoundsVersion = 0;
                 controller.State.Settings.MonitorDevice = monitor.DeviceName;
