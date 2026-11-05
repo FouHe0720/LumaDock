@@ -4,18 +4,18 @@
 
 <p align="center"><b>把整个桌面，变成你的主场</b></p>
 <p align="center">
-  <a href="https://github.com/FouHe0720/LumaDock/releases/tag/v0.11.3"><img src="https://img.shields.io/badge/Release-0.11.3-588e9d?style=flat-square" alt="Release 0.11.3"></a>
+  <a href="https://github.com/FouHe0720/LumaDock/releases/tag/v0.11.4"><img src="https://img.shields.io/badge/Release-0.11.4-588e9d?style=flat-square" alt="Release 0.11.4"></a>
   <img src="https://img.shields.io/badge/Windows-10%20%2F%2011%20x64-53798a?style=flat-square" alt="Windows 10 / 11 x64">
   <a href="https://github.com/FouHe0720/LumaDock/actions/workflows/build.yml"><img src="https://github.com/FouHe0720/LumaDock/actions/workflows/build.yml/badge.svg" alt="Windows build"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-7c8b82?style=flat-square" alt="MIT License"></a>
 </p>
 <p align="center">
-  <a href="https://github.com/FouHe0720/LumaDock/releases/download/v0.11.3/LumaDock-0.11.3-win-x64.zip"><img src="https://img.shields.io/badge/Download-Windows%20x64-3d7f84?style=for-the-badge" alt="下载 LumaDock Windows 便携版"></a>
+  <a href="https://github.com/FouHe0720/LumaDock/releases/download/v0.11.4/LumaDock-0.11.4-win-x64.zip"><img src="https://img.shields.io/badge/Download-Windows%20x64-3d7f84?style=for-the-badge" alt="下载 LumaDock Windows 便携版"></a>
 </p>
 <p align="center">完整解压即可运行 · 自带 .NET Runtime · 无需管理员权限 · 预发布</p>
 <p align="center">
   <a href="docs/USER-GUIDE.md">使用指南</a> ·
-  <a href="docs/RELEASE-0.11.3.md">本次更新</a> ·
+  <a href="docs/RELEASE-0.11.4.md">本次更新</a> ·
   <a href="docs/DEVELOPMENT.md">开发文档</a> ·
   <a href="docs/performance.md">性能记录</a>
 </p>
@@ -30,7 +30,15 @@ LumaDock 是一款原生 Windows Dock 与桌面管理工具。把常用软件和
   </tr>
 </table>
 
-## 0.11.3 · 小得下，也拿得稳
+## 0.11.4 · 重叠后，照样拖
+
+修复 Dock 放进任务栏区域后，松手就无法再次拖动的问题。返回桌面时，重叠的底座会保持可操作；抓住两端握柄，继续移动或缩放即可。
+
+切换到工作窗口，包括 LumaDock 的主界面时，底座随即退回普通层级，让工作窗口保持在前。任务栏本身的显示与设置保持原样。
+
+拖动握柄或底座空白处会激活 Dock，以便在移出原窗口范围后继续接收拖动；应用图标点击仍沿用启动与切换窗口的行为。层级随窗口事件调整，不增加持续轮询。
+
+### 小尺寸与独立空位继续保留
 
 图标最小尺寸降至 **16 DIP**。小图标搭配更薄的玻璃底座，L 图标也一起收小，保留清楚的比例；常用尺寸的外观继续保持。
 
@@ -53,7 +61,7 @@ Logo、LumaDock 名称与项目介绍分别居中，三项之间留出更舒展�
 
 自由摆放的 Dock 可以进入任务栏所在区域。拖住握柄或底座空白处，移到顺手的位置后松开，位置便会保存；刷新、重启或改变底座尺寸后，仍按所选屏幕恢复。四边停靠继续沿系统工作区摆放。
 
-Dock 保持普通窗口层级；Windows 任务栏若处于上方，会遮住重叠部分。软件不会隐藏任务栏或改变它的设置。需要找回 Dock 时，按 **Ctrl + Alt + Space**，在 **偏好设置 → Dock → 恢复位置** 回到底部居中。
+玻璃底座实际进入任务栏区域时，返回桌面或操作 Dock 可让重叠部分接收鼠标；切换到工作窗口后恢复普通层级。需要找回 Dock 时，按 **Ctrl + Alt + Space**，在 **偏好设置 → Dock → 恢复位置** 回到底部居中。
 
 在 **摆放方式** 中切换自由摆放与四边停靠。双击握柄／底座空白处也能恢复位置；图标自身的拖动继续用于排序。
 
@@ -75,7 +83,7 @@ Dock 保持普通窗口层级；Windows 任务栏若处于上方，会遮住重�
 
 应用库汇集已发现与手动添加的程序，支持搜索、多选添加和自建栏目。桌面集按实际路径展示文件，不把同名文档合并成一个项目。文件夹复制、其他文件模板及完整系统文件菜单可点击“打开桌面”使用资源管理器。
 
-Dock 延续普通窗口层级。打开其他软件时，工作窗口在上方；返回桌面使用 Dock，或按 **Ctrl + Alt + Space** 打开应用库。
+打开其他软件时，工作窗口在上方；返回桌面后继续使用 Dock，任务栏重叠区也能操作。也可按 **Ctrl + Alt + Space** 直接打开应用库。
 
 ## 通透底座，清楚倒影
 
@@ -92,7 +100,7 @@ Dock 延续普通窗口层级。打开其他软件时，工作窗口在上方；
 
 ## 三步开始
 
-1. [下载 Windows 便携版](https://github.com/FouHe0720/LumaDock/releases/download/v0.11.3/LumaDock-0.11.3-win-x64.zip)，**完整解压**到准备长期保留的可写文件夹。
+1. [下载 Windows 便携版](https://github.com/FouHe0720/LumaDock/releases/download/v0.11.4/LumaDock-0.11.4-win-x64.zip)，**完整解压**到准备长期保留的可写文件夹。
 2. 双击 **LumaDock.exe**，等待首次扫描。便携包包含 .NET Desktop Runtime，普通使用无需 SDK、IDE、字体包或额外主题工具。
 3. 点击 Dock 左端的 L 图标，或按 **Ctrl + Alt + Space** 打开应用库。右键常用应用 → **固定到 Dock**；未扫描到的程序通过“添加应用”选择路径。
 
@@ -116,6 +124,7 @@ cd LumaDock
 | 调整工作台大小 | 拖窗口边缘或四角；右上角可最大化与还原 |
 | 设置每行应用数 | **偏好设置 → 应用整理**，最高 20 个，按窗口宽度自适应 |
 | 移动整个 Dock | 拖移动握柄或底座空白处，松开保存位置；自由摆放可进入任务栏区域 |
+| 移动与任务栏重叠的 Dock | 先返回桌面，再拖两端握柄；切回工作窗口后底座恢复普通层级 |
 | 改变 Dock 与图标大小 | 拖右端空位中的缩放握柄；竖向摆放时拖下端，连续调整至 16–160 DIP |
 | 取消本次移动或缩放 | 松手前按 **Esc**，回到操作前的位置与尺寸 |
 | 恢复 Dock 到屏幕底部 | 双击握柄／底座空白处，或 **偏好设置 → Dock → 恢复位置** |
@@ -146,11 +155,9 @@ cd LumaDock
 
 指针停稳后，悬停和边缘流光停止动画。运行标记保持静态显示，不靠持续闪烁吸引注意。没有大型浏览器运行时，也没有额外后台服务。
 
-**0.11.3 本机实测：** 16 DIP 小尺寸 Dock 静置时，私有工作集峰值 **47.7 MB**、平均全机 CPU **0.00880%**；58 DIP 常规尺寸为 **48.8 MB**、**0.02078%**。
+**0.11.4 本机实测：** 58 DIP Dock 后台静置时，私有工作集峰值 **49.8 MB**、平均全机 CPU **0.00656%**。最终程序固定 2 个程序和 1 个实际文件夹、倒影 90%，预热 20 秒后请求采样 30 秒。私有工作集与总工作集、私有提交的完整口径见[性能记录](docs/performance.md)；短测不代表持续操作或长期驻留。
 
-两轮使用同一最终程序，固定 2 个程序和 1 个实际文件夹，倒影 90%、底座浓度 4%；各预热 20 秒后请求采样 30 秒。私有工作集与总工作集、私有提交不同，完整口径见记录；静置短测不代表持续操作、所有设备或过夜驻留。
-
-本版 **281 项定向组件与 WPF 检查**通过，另以实际鼠标验证小尺寸下的握柄移动、放大与缩回最小值。旧版的其他检查单独保留为历史记录。[查看检查范围 →](docs/validation.md)
+本版 **254 项定向组件与 WPF 检查**通过。新增原生命中与自动降层检查，另用实际鼠标验证任务栏内松手后再次拖出、从重叠区拉动缩放。[查看验证范围 →](docs/validation.md)
 
 性能数字来自 Windows 实测，报告保留采样条件与程序集校验值。短测、交互检查与长期驻留的边界分别记录，见 [性能记录](docs/performance.md) 和 [验证范围](docs/validation.md)。
 

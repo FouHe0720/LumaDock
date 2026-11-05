@@ -17,6 +17,7 @@
     <Project Path="tests/LumaDock.Icon.Tests/LumaDock.Icon.Tests.csproj" />
     <Project Path="tests/LumaDock.Importer.Ui.Tests/LumaDock.Importer.Ui.Tests.csproj" />
     <Project Path="tests/LumaDock.Layout.Tests/LumaDock.Layout.Tests.csproj" />
+    <Project Path="tests/LumaDock.Layer.Ui.Tests/LumaDock.Layer.Ui.Tests.csproj" />
     <Project Path="tests/LumaDock.Lens.Tests/LumaDock.Lens.Tests.csproj" />
     <Project Path="tests/LumaDock.Sampler.Tests/LumaDock.Sampler.Tests.csproj" />
     <Project Path="tests/LumaDock.Tests/LumaDock.Tests.csproj" />

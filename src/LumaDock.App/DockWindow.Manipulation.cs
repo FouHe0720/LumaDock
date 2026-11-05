@@ -116,7 +116,7 @@ public sealed partial class DockWindow
             }
             Cursor = resize ? Cursors.SizeNWSE : Cursors.SizeAll;
             hideDelay.Stop(); StopHover(); highlight.StopMotion(); ClearInsertion();
-            StartManipulationKeys(); NativeWindowHelper.ApplyDockLayer(handle); return true;
+            StartManipulationKeys(); ApplyLayer(); return true;
         }
         catch
         {
@@ -188,7 +188,7 @@ public sealed partial class DockWindow
             var frame = DockPlacementGeometry.Clamp(DragBounds(monitor), proposed, PlacementInset());
             if (WindowFrame() is { } current && current == frame) return;
             NativeWindowHelper.SetPosition(handle, frame.X, frame.Y, frame.Width, frame.Height);
-            NativeWindowHelper.ApplyDockLayer(handle);
+            ApplyLayer();
         }
     }
 
@@ -237,7 +237,7 @@ public sealed partial class DockWindow
                 || string.IsNullOrEmpty(origin.Monitor))
                 NativeWindowHelper.SetPosition(handle, origin.Frame.X, origin.Frame.Y, origin.Frame.Width, origin.Frame.Height);
         }
-        NativeWindowHelper.ApplyDockLayer(handle); liquid.Refresh(); ScheduleHide();
+        ApplyLayer(); liquid.Refresh(); ScheduleHide();
     }
 
     private void UpdateDockMetrics()

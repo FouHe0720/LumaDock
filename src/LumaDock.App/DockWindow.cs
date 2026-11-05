@@ -49,6 +49,7 @@ public sealed partial class DockWindow : Window
     private Point dragStart;
     private IntPtr handle;
     private HwndSource? source;
+    private DockLayerService? dockLayer;
     private int generation;
     private double fullWidth, fullHeight;
     private bool Vertical => controller.State.Settings.Position is "Left" or "Right";
@@ -86,17 +87,19 @@ public sealed partial class DockWindow : Window
         MouseMove += Magnify;
         MouseEnter += (_, _) => { hideDelay.Stop(); Reveal(); };
         MouseLeave += (_, _) => { lastPointer = new(double.NaN, double.NaN); highlight.ReleasePointer(); if (positionDragging) StopHover(); else ResetMagnification(); if (AutoHideEnabled && !positionDragging) hideDelay.Start(); };
-        IsVisibleChanged += (_, _) => { if (!IsVisible) { EndDirectManipulation(true); StopHover(); } else if (rebuildAfterDrag && !positionDragging) { rebuildAfterDrag = false; Rebuild(); } };
+        IsVisibleChanged += (_, _) => { if (!IsVisible) { EndDirectManipulation(true); StopHover(); } else if (rebuildAfterDrag && !positionDragging) { rebuildAfterDrag = false; Rebuild(); } ApplyLayer(); };
         hideDelay.Tick += HideTick;
         SourceInitialized += (_, _) =>
         {
             handle = new WindowInteropHelper(this).Handle;
             NativeWindowHelper.ConfigureDock(handle);
             source = HwndSource.FromHwnd(handle); source?.AddHook(WndProc);
+            dockLayer = new DockLayerService(handle, VisibleLayerBounds);
+            if (!dockLayer.Start()) Storage.Log.Write("Dock foreground observation unavailable; retaining the ordinary window layer.");
         };
         Loaded += (_, _) => { UpdateSettings(); if (AutoHideEnabled) hideDelay.Start(); };
         ContentRendered += (_, _) => controller.RecordDockFrame();
-        Closed += (_, _) => { EndDirectManipulation(true); closed = true; StopManipulationKeys(); ClearInsertion(); StopHover(); hover.Tick -= HoverTick; highlight.StopMotion(); hideDelay.Stop(); hideDelay.Tick -= HideTick; source?.RemoveHook(WndProc); generation++; };
+        Closed += (_, _) => { EndDirectManipulation(true); closed = true; dockLayer?.Dispose(); dockLayer = null; StopManipulationKeys(); ClearInsertion(); StopHover(); hover.Tick -= HoverTick; highlight.StopMotion(); hideDelay.Stop(); hideDelay.Tick -= HideTick; source?.RemoveHook(WndProc); generation++; };
         ContextMenu = DockMenu();
         ContextMenu.Closed += (_, _) => ScheduleHide();
         AddMenu(ContextMenu, "打开应用", () => controller.ShowCenter());
@@ -117,7 +120,14 @@ public sealed partial class DockWindow : Window
             // work area. Own client capture keeps taskbar-area placements intact.
             if (IsPositionDragPoint(point) || IsResizeDragPoint(point)) { handled = true; return new IntPtr(1); }
         }
-        if (msg == 0x0021 /* WM_MOUSEACTIVATE */) { handled = true; return new IntPtr(3); /* MA_NOACTIVATE. */ }
+        if (msg == 0x0021 /* WM_MOUSEACTIVATE */)
+        {
+            // A deliberate manipulation needs foreground capture across Shell
+            // surfaces. Application clicks keep the no-activation launch path.
+            handled = true;
+            return Native.GetCursorPos(out var cursor)
+                ? new IntPtr(PointerActivation(new Point(cursor.X, cursor.Y))) : new IntPtr(3);
+        }
         if (msg is 0x0200 or 0x0201 or 0x0202 or 0x0203)
         {
             // MSG.pt belongs to this queued mouse message. GetCursorPos can
@@ -129,6 +139,7 @@ public sealed partial class DockWindow : Window
         if (msg == 0x001F /* WM_CANCELMODE */ || msg == 0x0215 /* WM_CAPTURECHANGED */ && l != handle)
             EndDirectManipulation(true);
         if (msg == 0x007E /* WM_DISPLAYCHANGE */) EndDirectManipulation(true);
+        if (msg is 0x007E or 0x001A) ApplyLayer();
         if (msg == 0x2E0) Dispatcher.BeginInvoke(() => { if (positionDragging) { rebuildAfterDrag = true; QueueDirectUpdate(lastManipulationPoint); return; } Rebuild(); liquid.Refresh(); });
         return IntPtr.Zero;
     }
@@ -153,6 +164,24 @@ public sealed partial class DockWindow : Window
             element = element is FrameworkContentElement content ? content.Parent : VisualTreeHelper.GetParent(element);
         }
         return true;
+    }
+
+    private int PointerActivation(Point screen)
+    {
+        var point = PointFromScreen(screen);
+        return IsPositionDragPoint(point) || IsResizeDragPoint(point) ? 1 : 3;
+    }
+
+    private DockFrame? VisibleLayerBounds()
+    {
+        if (closed || tucked || !IsVisible || WindowFrame() is not { } frame) return null;
+        return GlassFrame(frame, Math.Max(1u, Native.GetDpiForWindow(handle)) / 96d);
+    }
+
+    private void ApplyLayer()
+    {
+        if (handle == IntPtr.Zero) return;
+        if (dockLayer is not null) dockLayer.Refresh(); else NativeWindowHelper.ApplyDockLayer(handle);
     }
 
     private DockFrame? WindowFrame() => Native.GetWindowRect(handle, out var rect) ? new(rect.Left, rect.Top, rect.Right - rect.Left, rect.Bottom - rect.Top) : null;
@@ -402,7 +431,7 @@ public sealed partial class DockWindow : Window
             if (IsVisible) Hide();
         }
         else if (!IsVisible) { Show(); Reposition(); }
-        if (IsVisible && handle != IntPtr.Zero) NativeWindowHelper.ApplyDockLayer(handle);
+        if (IsVisible && handle != IntPtr.Zero) ApplyLayer();
     }
 
     public void Reposition()
@@ -471,7 +500,7 @@ public sealed partial class DockWindow : Window
             x = frame.X; y = frame.Y; w = frame.Width; h = frame.Height;
         }
         NativeWindowHelper.SetPosition(handle, x, y, w, h);
-        NativeWindowHelper.ApplyDockLayer(handle);
+        ApplyLayer();
     }
 
     private void UpdateContour()
@@ -693,8 +722,10 @@ public sealed partial class DockWindow : Window
     private static class Native
     {
         [StructLayout(LayoutKind.Sequential)] internal struct Rect { public int Left, Top, Right, Bottom; }
+        [StructLayout(LayoutKind.Sequential)] internal struct CursorPoint { public int X, Y; }
         [DllImport("user32.dll")] internal static extern uint GetDpiForWindow(IntPtr hwnd);
         [DllImport("user32.dll")] [return: MarshalAs(UnmanagedType.Bool)] internal static extern bool GetWindowRect(IntPtr hwnd, out Rect rect);
         [DllImport("user32.dll")] internal static extern uint GetMessagePos();
+        [DllImport("user32.dll")] [return: MarshalAs(UnmanagedType.Bool)] internal static extern bool GetCursorPos(out CursorPoint point);
     }
 }
